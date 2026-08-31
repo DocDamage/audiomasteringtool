@@ -4,8 +4,7 @@
   "configurePresets": [
     {
       "name": "windows-msvc",
-      "displayName": "Windows MSVC x64",
-      "generator": "Visual Studio 17 2022",
+      "displayName": "Windows MSVC x64 (auto-detected Visual Studio)",
       "binaryDir": "${sourceDir}/build/windows-msvc",
       "architecture": "x64",
       "cacheVariables": {

@@ -25,6 +25,6 @@ jobs:
           $actual = (git -C "$env:RUNNER_TEMP/JUCE" rev-parse HEAD).Trim()
           if ($actual -ne '91ad83ae34a81e0833b1a2b0866f54846370ae53') { throw 'JUCE pin mismatch' }
       - name: Configure
-        run: cmake -S spikes/juce-host -B build/juce8-spike -G "Visual Studio 17 2022" -A x64 -DJUCE_SOURCE_DIR="$env:RUNNER_TEMP/JUCE"
+        run: cmake -S spikes/juce-host -B build/juce8-spike -A x64 -DJUCE_SOURCE_DIR="$env:RUNNER_TEMP/JUCE"
       - name: Build
         run: cmake --build build/juce8-spike --config Release

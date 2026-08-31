@@ -7,11 +7,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(AMT_BUILD_TESTS "Build tests" ON)
-option(AMT_WITH_ONNX "Enable ONNX Runtime integration" OFF)
+option(AMT_BUILD_BENCHMARKS "Build benchmark harness" ON)
+option(AMT_WITH_ONNX "Enable production ONNX Runtime integration" OFF)
 
 add_subdirectory(src/core)
+add_subdirectory(src/codec)
 add_subdirectory(src/worker)
+add_subdirectory(src/cli)
 add_subdirectory(src/app)
+
+if(AMT_BUILD_BENCHMARKS)
+  add_subdirectory(src/bench)
+endif()
 
 if(AMT_BUILD_TESTS)
   enable_testing()

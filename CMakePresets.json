@@ -3,14 +3,13 @@
   "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
   "configurePresets": [
     {
-      "name": "windows-msvc-debug",
-      "displayName": "Windows MSVC Debug",
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/build/windows-msvc-debug",
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC x64 (auto-detected Visual Studio)",
+      "binaryDir": "${sourceDir}/build/windows-msvc",
       "architecture": "x64",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
         "AMT_BUILD_TESTS": "ON",
+        "AMT_BUILD_BENCHMARKS": "ON",
         "AMT_WITH_ONNX": "OFF"
       }
     },
@@ -22,15 +21,18 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "AMT_BUILD_TESTS": "ON",
+        "AMT_BUILD_BENCHMARKS": "ON",
         "AMT_WITH_ONNX": "OFF"
       }
     }
   ],
   "buildPresets": [
-    {"name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug"},
+    {"name": "windows-debug", "configurePreset": "windows-msvc", "configuration": "Debug"},
+    {"name": "windows-release", "configurePreset": "windows-msvc", "configuration": "Release"},
     {"name": "ninja-debug", "configurePreset": "ninja-debug"}
   ],
   "testPresets": [
+    {"name": "windows-debug", "configurePreset": "windows-msvc", "configuration": "Debug", "output": {"outputOnFailure": true}},
     {"name": "ninja-debug", "configurePreset": "ninja-debug", "output": {"outputOnFailure": true}}
   ]
 }

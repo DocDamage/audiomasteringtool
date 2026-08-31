@@ -9,31 +9,85 @@ permissions:
   contents: read
 
 jobs:
-  build-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            preset: windows-msvc-debug
-          - os: ubuntu-latest
-            preset: ninja-debug
-    runs-on: ${{ matrix.os }}
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
-      - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        run: ctest --test-dir build/windows-msvc-debug -C Debug --output-on-failure
-      - name: Test (Linux)
-        if: runner.os != 'Windows'
-        run: ctest --test-dir build/ninja-debug --output-on-failure
-      - name: Worker health (Windows)
-        if: runner.os == 'Windows'
-        run: build/windows-msvc-debug/src/worker/Debug/amt_worker.exe --health
-      - name: Worker health (Linux)
-        if: runner.os != 'Windows'
-        run: ./build/ninja-debug/src/worker/amt_worker --health
+        run: cmake --preset windows-msvc
+      - name: Build Debug
+        run: cmake --build --preset windows-debug
+      - name: Build Release
+        run: cmake --build --preset windows-release
+      - name: Unit tests
+        run: ctest --preset windows-debug
+      - name: Worker health
+        run: build/windows-msvc/src/worker/Debug/amt_worker.exe --health
+      - name: Worker IPC
+        run: python scripts/test_worker_ipc.py build/windows-msvc/src/worker/Debug/amt_worker.exe
+      - name: Install verified libsndfile runtime
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip'
+          $expected = '2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f'
+          $zip = Join-Path $env:RUNNER_TEMP 'libsndfile.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'libsndfile'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "libsndfile SHA256 mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $dll = Get-ChildItem -Path $dest -Recurse -File -Filter '*sndfile*.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'sndfile DLL not found in verified archive' }
+          $dll.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Codec status
+        run: build/windows-msvc/src/cli/Debug/amt_cli.exe codec-status
+      - name: Generate synthetic fixtures
+        run: python scripts/generate_phase0_fixtures.py build/phase0-fixtures
+      - name: WAV lossless round trip
+        shell: pwsh
+        run: |
+          $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
+          & $cli probe build/phase0-fixtures/sine_pcm16.wav
+          & $cli rerender build/phase0-fixtures/sine_pcm16.wav "$env:RUNNER_TEMP/amt-roundtrip.wav"
+          & $cli verify build/phase0-fixtures/sine_pcm16.wav "$env:RUNNER_TEMP/amt-roundtrip.wav"
+      - name: FLAC lossless round trip
+        shell: pwsh
+        run: |
+          $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
+          & $cli probe build/phase0-fixtures/sine_pcm16.flac
+          & $cli rerender build/phase0-fixtures/sine_pcm16.flac "$env:RUNNER_TEMP/amt-roundtrip.flac"
+          & $cli verify build/phase0-fixtures/sine_pcm16.flac "$env:RUNNER_TEMP/amt-roundtrip.flac"
+      - name: Benchmark smoke
+        run: build/windows-msvc/src/bench/Release/amt_bench.exe --minutes 1
+      - name: Model registry
+        run: python scripts/validate_model_registry.py
+      - name: Dependency manifest
+        run: python scripts/validate_dependencies.py
+
+  portable-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libsndfile1
+      - run: cmake --preset ninja-debug
+      - run: cmake --build --preset ninja-debug
+      - run: ctest --preset ninja-debug
+      - run: python scripts/test_worker_ipc.py build/ninja-debug/src/worker/amt_worker
+      - run: build/ninja-debug/src/cli/amt_cli codec-status
+      - run: python scripts/generate_phase0_fixtures.py build/phase0-fixtures
+      - run: build/ninja-debug/src/cli/amt_cli rerender build/phase0-fixtures/sine_pcm16.wav /tmp/amt.wav
+      - run: build/ninja-debug/src/cli/amt_cli verify build/phase0-fixtures/sine_pcm16.wav /tmp/amt.wav
+      - run: build/ninja-debug/src/cli/amt_cli rerender build/phase0-fixtures/sine_pcm16.flac /tmp/amt.flac
+      - run: build/ninja-debug/src/cli/amt_cli verify build/phase0-fixtures/sine_pcm16.flac /tmp/amt.flac
+      - run: python scripts/validate_model_registry.py
+      - run: python scripts/validate_dependencies.py

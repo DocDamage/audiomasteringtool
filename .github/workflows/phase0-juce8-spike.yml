@@ -1,0 +1,30 @@
+name: Phase 0 JUCE 8 Host Spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'spikes/juce-host/**'
+      - '.github/workflows/phase0-juce8-spike.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch pinned JUCE 8.0.15
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP/JUCE"
+          git -C "$env:RUNNER_TEMP/JUCE" checkout 91ad83ae34a81e0833b1a2b0866f54846370ae53
+          $actual = (git -C "$env:RUNNER_TEMP/JUCE" rev-parse HEAD).Trim()
+          if ($actual -ne '91ad83ae34a81e0833b1a2b0866f54846370ae53') { throw 'JUCE pin mismatch' }
+      - name: Configure
+        run: cmake -S spikes/juce-host -B build/juce8-spike -A x64 -DJUCE_SOURCE_DIR="$env:RUNNER_TEMP/JUCE"
+      - name: Build
+        run: cmake --build build/juce8-spike --config Release

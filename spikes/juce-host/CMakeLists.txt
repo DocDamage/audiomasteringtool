@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(amt_juce8_host_spike VERSION 0.0.1 LANGUAGES CXX)
+project(amt_juce8_host_spike VERSION 0.0.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(JUCE_SOURCE_DIR "" CACHE PATH "Path to JUCE 8.0.15 source tree")

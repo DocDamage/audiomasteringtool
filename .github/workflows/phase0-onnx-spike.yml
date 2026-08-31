@@ -20,7 +20,7 @@ jobs:
   cpu:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -56,7 +56,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_cuda }}
     runs-on: [self-hosted, Windows, X64, nvidia]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5

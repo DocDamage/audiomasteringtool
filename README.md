@@ -40,7 +40,7 @@ Detailed Phase 0 evidence is in [`docs/PHASE_0_ACCEPTANCE.md`](docs/PHASE_0_ACCE
 
 ### Windows
 
-Requirements: Visual Studio 2022 with C++ tools and CMake 3.24+.
+Requirements: Visual Studio with the C++ desktop workload (VS 2022 or newer) and a CMake version that supports the installed Visual Studio generator. The checked-in Windows preset auto-detects the installed Visual Studio; current CI validates VS 2026.
 
 ```powershell
 cmake --preset windows-msvc

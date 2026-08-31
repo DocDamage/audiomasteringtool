@@ -1,3 +1,6 @@
+#include <memory>
+#include <utility>
+
 #include <juce_gui_extra/juce_gui_extra.h>
 
 class MainWindow final : public juce::DocumentWindow {
@@ -19,8 +22,11 @@ class SpikeApplication final : public juce::JUCEApplication {
  public:
   const juce::String getApplicationName() override { return "AMT JUCE 8 Host Spike"; }
   const juce::String getApplicationVersion() override { return "0.0.1"; }
-  void initialise(const juce::String&) override { window = std::make_unique<MainWindow>(getApplicationName()); }
+  void initialise(const juce::String&) override {
+    window = std::make_unique<MainWindow>(getApplicationName());
+  }
   void shutdown() override { window.reset(); }
+
  private:
   std::unique_ptr<MainWindow> window;
 };

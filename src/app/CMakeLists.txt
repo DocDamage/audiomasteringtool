@@ -1,0 +1,8 @@
+add_executable(audiomasteringtool WIN32 main.cpp)
+target_link_libraries(audiomasteringtool PRIVATE amt_core)
+include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
+amt_enable_warnings(audiomasteringtool)
+
+if(WIN32)
+  target_compile_definitions(audiomasteringtool PRIVATE UNICODE _UNICODE)
+endif()

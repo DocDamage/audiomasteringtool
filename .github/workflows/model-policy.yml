@@ -1,0 +1,26 @@
+name: Model Policy
+
+on:
+  push:
+    paths:
+      - 'models/**'
+      - 'scripts/validate_model_registry.py'
+      - '.github/workflows/model-policy.yml'
+  pull_request:
+    paths:
+      - 'models/**'
+      - 'scripts/validate_model_registry.py'
+      - '.github/workflows/model-policy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/validate_model_registry.py

@@ -1,0 +1,3 @@
+add_executable(amt_phase0_tests phase0_tests.cpp)
+target_link_libraries(amt_phase0_tests PRIVATE amt_core)
+add_test(NAME phase0_core COMMAND amt_phase0_tests)

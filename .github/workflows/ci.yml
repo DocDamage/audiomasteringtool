@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            preset: windows-msvc-debug
+          - os: ubuntu-latest
+            preset: ninja-debug
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build/windows-msvc-debug -C Debug --output-on-failure
+      - name: Test (Linux)
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build/ninja-debug --output-on-failure
+      - name: Worker health (Windows)
+        if: runner.os == 'Windows'
+        run: build/windows-msvc-debug/src/worker/Debug/amt_worker.exe --health
+      - name: Worker health (Linux)
+        if: runner.os != 'Windows'
+        run: ./build/ninja-debug/src/worker/amt_worker --health

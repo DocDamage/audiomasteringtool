@@ -1,15 +1,23 @@
-name: Model Policy
+name: Dependency and Model Policy
 
 on:
   push:
     paths:
       - 'models/**'
+      - 'third_party/**'
+      - 'MODEL_LICENSES.md'
+      - 'THIRD_PARTY_NOTICES.md'
       - 'scripts/validate_model_registry.py'
+      - 'scripts/validate_dependencies.py'
       - '.github/workflows/model-policy.yml'
   pull_request:
     paths:
       - 'models/**'
+      - 'third_party/**'
+      - 'MODEL_LICENSES.md'
+      - 'THIRD_PARTY_NOTICES.md'
       - 'scripts/validate_model_registry.py'
+      - 'scripts/validate_dependencies.py'
       - '.github/workflows/model-policy.yml'
 
 permissions:
@@ -20,7 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python scripts/validate_model_registry.py
+      - run: python scripts/validate_dependencies.py

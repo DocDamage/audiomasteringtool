@@ -1,0 +1,83 @@
+name: Phase 0 ONNX Runtime Spike
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_cuda:
+        description: 'Run CUDA inference on a matching self-hosted NVIDIA runner'
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - 'spikes/onnx-runtime/**'
+      - '.github/workflows/phase0-onnx-spike.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install model-generator dependency
+        run: python -m pip install onnx==1.22.0
+      - name: Download and verify ONNX Runtime CPU 1.29.0
+        id: ort
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip'
+          $expected = 'c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2'
+          $zip = Join-Path $env:RUNNER_TEMP 'ort.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'ort'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "ONNX Runtime SHA256 mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $root = Get-ChildItem -Path $dest -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'include/onnxruntime_cxx_api.h') } | Select-Object -First 1
+          if (-not $root) { throw 'ONNX Runtime root not found' }
+          "root=$($root.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          (Join-Path $root.FullName 'lib') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - run: python spikes/onnx-runtime/generate_model.py build/phase0_abs.onnx
+      - name: Configure spike
+        run: cmake -S spikes/onnx-runtime -B build/onnx-spike -G "Visual Studio 17 2022" -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}"
+      - run: cmake --build build/onnx-spike --config Release
+      - run: build/onnx-spike/Release/amt_onnx_spike.exe build/phase0_abs.onnx cpu
+
+  cuda-runtime:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_cuda }}
+    runs-on: [self-hosted, Windows, X64, nvidia]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install onnx==1.22.0
+      - name: Download and verify ONNX Runtime CUDA 13 package
+        id: ort
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-gpu_cuda13-1.29.0.zip'
+          $expected = '0d2ab3feb9ed0ae68ccbbf2013ac87ad58a3b31bc8b28c5854f2ccacecbd8d90'
+          $zip = Join-Path $env:RUNNER_TEMP 'ort-gpu.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'ort-gpu'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "ONNX Runtime SHA256 mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $root = Get-ChildItem -Path $dest -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'include/onnxruntime_cxx_api.h') } | Select-Object -First 1
+          if (-not $root) { throw 'ONNX Runtime root not found' }
+          "root=$($root.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          (Join-Path $root.FullName 'lib') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - run: python spikes/onnx-runtime/generate_model.py build/phase0_abs.onnx
+      - run: cmake -S spikes/onnx-runtime -B build/onnx-cuda-spike -G "Visual Studio 17 2022" -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}" -DAMT_ORT_ENABLE_CUDA=ON
+      - run: cmake --build build/onnx-cuda-spike --config Release
+      - run: build/onnx-cuda-spike/Release/amt_onnx_spike.exe build/phase0_abs.onnx cuda

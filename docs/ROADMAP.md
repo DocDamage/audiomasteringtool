@@ -1,19 +1,23 @@
 # Roadmap
 
-The authoritative product requirements live in `AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md`.
+The authoritative roadmap is `AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md`.
 
-## Current baseline
+## 0.0.1 — Phase 0: foundation
 
-**0.0.1 / Phase 0 — Foundation**
+Implemented:
 
-Established:
-- portable core
-- Windows app shell
-- isolated ML worker
-- inference abstraction
-- CI/tests
-- architecture and ADRs
-- model/dependency governance
-- security baseline
+- C++20 core/domain contracts
+- Windows shell + CLI
+- streaming WAV/FLAC proof
+- worker isolation + IPC proof
+- inference-provider abstraction
+- CI/test/benchmark infrastructure
+- dependency/model governance
+- JUCE/ONNX/WebGPU/codec technical spikes
+- 60-minute streaming regression
 
-Next implementation work should begin with the first audio-I/O / analysis milestone defined in the authoritative specification, not by expanding the UI into a DAW.
+## Next — Phase 1: audio foundation and standards-compliant metering
+
+Implement production audio I/O, playback, waveform caching, transparent export, resampling, BS.1770-5 loudness/true-peak metering, spectral analysis, and stereo/phase analysis.
+
+Do not expand the UI into a DAW. The product remains focused on analyze → repair → master → compare → export.

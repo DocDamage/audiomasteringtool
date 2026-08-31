@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "name": "libsndfile",
+      "version": "1.2.2",
+      "purpose": "Phase 0 runtime-loaded WAV/FLAC streaming proof",
+      "source": "https://github.com/libsndfile/libsndfile/releases/tag/1.2.2",
+      "integration": "dynamic runtime loading; not linked into default build",
+      "license": "LGPL-2.1-or-later",
+      "productionStatus": "phase0-baseline",
+      "windowsX64Artifact": "libsndfile-1.2.2-win64.zip",
+      "windowsX64Sha256": "2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f"
+    },
+    {
+      "name": "ONNX Runtime",
+      "version": "1.29.0",
+      "purpose": "C++ CPU/CUDA inference spike; intended production inference abstraction",
+      "source": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
+      "integration": "spike only in Phase 0",
+      "license": "MIT",
+      "productionStatus": "candidate",
+      "windowsCpuArtifact": "onnxruntime-win-x64-1.29.0.zip",
+      "windowsCpuSha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
+      "windowsCuda12Artifact": "onnxruntime-win-x64-gpu_cuda12-1.29.0.zip",
+      "windowsCuda12Sha256": "3526773ba1fef5849a3e9d18558d87bbbb75b0db3ddcde4f08694a746ac3169f",
+      "windowsCuda13Artifact": "onnxruntime-win-x64-gpu_cuda13-1.29.0.zip",
+      "windowsCuda13Sha256": "0d2ab3feb9ed0ae68ccbbf2013ac87ad58a3b31bc8b28c5854f2ccacecbd8d90"
+    },
+    {
+      "name": "JUCE",
+      "version": "8.0.15",
+      "commit": "91ad83ae34a81e0833b1a2b0866f54846370ae53",
+      "purpose": "Standalone/plugin-host feasibility spike",
+      "source": "https://github.com/juce-framework/JUCE/tree/8.0.15",
+      "integration": "optional spike only; never linked by default Phase 0 build",
+      "license": "AGPL-3.0-or-later OR commercial JUCE 8 licence",
+      "productionStatus": "licensing-gated-candidate"
+    },
+    {
+      "name": "FFmpeg",
+      "version": "unselected",
+      "purpose": "Future broad codec support evaluation",
+      "source": "https://ffmpeg.org/",
+      "integration": "not bundled or linked in Phase 0",
+      "license": "LGPL-2.1-or-later by default; optional GPL components change obligations",
+      "productionStatus": "evaluation-only"
+    }
+  ]
+}

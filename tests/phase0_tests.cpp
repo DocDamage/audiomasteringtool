@@ -1,5 +1,7 @@
 #include <cassert>
 #include <string>
+
+#include "amt/codec/SndFileDynamic.h"
 #include "amt/core/AnalysisTypes.h"
 #include "amt/core/InferenceBackend.h"
 #include "amt/core/Version.h"
@@ -18,5 +20,9 @@ int main() {
 
   auto bad = backend->run({.model_id = "", .input = {}});
   assert(!bad.ok);
+
+  assert(amt::codec::is_phase0_baseline_format(0x010000 | 0x0002));  // WAV PCM16
+  assert(amt::codec::is_phase0_baseline_format(0x170000 | 0x0003));  // FLAC PCM24
+  assert(!amt::codec::is_phase0_baseline_format(0x010000 | 0x0006)); // WAV float
   return 0;
 }

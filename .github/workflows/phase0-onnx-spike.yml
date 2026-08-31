@@ -46,7 +46,7 @@ jobs:
           (Join-Path $root.FullName 'lib') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: python spikes/onnx-runtime/generate_model.py build/phase0_abs.onnx
       - name: Configure spike
-        run: cmake -S spikes/onnx-runtime -B build/onnx-spike -G "Visual Studio 17 2022" -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}"
+        run: cmake -S spikes/onnx-runtime -B build/onnx-spike -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}"
       - run: cmake --build build/onnx-spike --config Release
       - run: build/onnx-spike/Release/amt_onnx_spike.exe build/phase0_abs.onnx cpu
 
@@ -78,6 +78,6 @@ jobs:
           "root=$($root.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           (Join-Path $root.FullName 'lib') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: python spikes/onnx-runtime/generate_model.py build/phase0_abs.onnx
-      - run: cmake -S spikes/onnx-runtime -B build/onnx-cuda-spike -G "Visual Studio 17 2022" -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}" -DAMT_ORT_ENABLE_CUDA=ON
+      - run: cmake -S spikes/onnx-runtime -B build/onnx-cuda-spike -A x64 -DONNXRUNTIME_ROOT="${{ steps.ort.outputs.root }}" -DAMT_ORT_ENABLE_CUDA=ON
       - run: cmake --build build/onnx-cuda-spike --config Release
       - run: build/onnx-cuda-spike/Release/amt_onnx_spike.exe build/phase0_abs.onnx cuda

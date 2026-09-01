@@ -527,15 +527,27 @@ std::optional<SeparationCacheEntry> SeparationCache::load_complete(
   }
 
   for (const auto& artifact : entry.artifacts) {
+    const auto artifact_path = directory / artifact.relative_path;
     std::error_code exists_error;
-    const bool exists = std::filesystem::is_regular_file(directory / artifact.relative_path,
-                                                         exists_error);
+    const bool exists = std::filesystem::exists(artifact_path, exists_error);
     if (exists_error) {
       error = "unable to inspect cached separation artifact: " + exists_error.message();
       return std::nullopt;
     }
     if (!exists) {
       error.clear();
+      return std::nullopt;
+    }
+
+    std::error_code type_error;
+    const bool regular = std::filesystem::is_regular_file(artifact_path, type_error);
+    if (type_error) {
+      error = "unable to inspect cached separation artifact: " + type_error.message();
+      return std::nullopt;
+    }
+    if (!regular) {
+      error = "cached separation artifact is not a regular file: " +
+              path_to_utf8(artifact.relative_path);
       return std::nullopt;
     }
   }

@@ -80,7 +80,8 @@ void WaveformPeakAccumulator::flush_base_bin() {
 
 WaveformPeakCache WaveformPeakAccumulator::finalize() {
   flush_base_bin();
-  WaveformPeakCache cache{.sample_rate = sample_rate_, .source_frames = source_frames_};
+  WaveformPeakCache cache{
+      .sample_rate = sample_rate_, .source_frames = source_frames_, .levels = {}};
   if (base_bins_.empty() || base_bins_.front().empty()) return cache;
 
   WaveformLevel current{.frames_per_bin = base_frames_per_bin_, .channels = base_bins_};

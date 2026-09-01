@@ -65,3 +65,31 @@ target_link_libraries(amt_phase5_fingerprint_tests PRIVATE
   amt_separation
 )
 add_test(NAME phase5_source_fingerprint_and_cache_identity COMMAND amt_phase5_fingerprint_tests)
+
+add_executable(amt_phase5_reconstruction_contract_tests phase5_reconstruction_contract_tests.cpp)
+target_link_libraries(amt_phase5_reconstruction_contract_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_complete_reconstruction_contract COMMAND amt_phase5_reconstruction_contract_tests)
+
+add_executable(amt_phase5_artifact_evaluator_tests phase5_artifact_evaluator_tests.cpp)
+target_link_libraries(amt_phase5_artifact_evaluator_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_reconstruction_artifact_evaluator COMMAND amt_phase5_artifact_evaluator_tests)
+
+add_executable(amt_phase5_source_guided_processing_tests phase5_source_guided_processing_tests.cpp)
+target_link_libraries(amt_phase5_source_guided_processing_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_source_guided_processing_plan COMMAND amt_phase5_source_guided_processing_tests)
+
+add_executable(amt_phase5_source_control_tests phase5_source_control_tests.cpp)
+target_link_libraries(amt_phase5_source_control_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_source_control_envelopes COMMAND amt_phase5_source_control_tests)

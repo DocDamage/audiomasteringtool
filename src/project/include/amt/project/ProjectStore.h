@@ -42,8 +42,6 @@ struct ProjectRecord {
   std::string analysis_json;
   std::string master_a_graph_json;
   std::string master_b_graph_json;
-  std::string source_diagnostics_summary;
-  std::string source_diagnostics_json;
   std::vector<RevisionNode> revisions;
 };
 

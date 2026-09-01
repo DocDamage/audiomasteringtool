@@ -6,6 +6,7 @@ add_library(amt_separation STATIC
   src/SourceControlEnvelope.cpp
   src/SourceIssueInference.cpp
   src/SourceGuidedWorkflow.cpp
+  src/ModelRegistry.cpp
   src/WorkerSeparationProvider.cpp
   src/SourceGuidedStereoExecutor.cpp
   src/SourceGuidedStereoRenderer.cpp

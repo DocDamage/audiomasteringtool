@@ -132,7 +132,7 @@ void test_valid_active_registry_maps_worker_contract() {
   assert(config.execution_provider == "cpu");
   assert(config.model_artifact == root / "models" / "synthetic" / "model.onnx");
   assert(config.fallback_output_root == root / "source-estimates");
-  assert(warning_contains(selection->warnings, "artifact is not present"));
+  assert(!warning_contains(selection->warnings, "artifact is not present"));
 
   const auto eligibility =
       amt::separation::evaluate_model_for_bundled_production(config.manifest);

@@ -35,10 +35,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ValueError(f"unsupported calibration manifest: {path}")
     if data.get("guidedCandidateRendered") is not True:
         raise ValueError(f"manifest has no guided calibration candidate: {path}")
-    for field in ("source", "stereoMasterA", "guidedMasterA", "modelName", "modelVersion"):
+    for field in (
+        "source",
+        "stereoMasterA",
+        "guidedMasterA",
+        "stereoBlindAudition",
+        "guidedBlindAudition",
+        "modelName",
+        "modelVersion",
+    ):
         value = data.get(field)
         if not isinstance(value, str) or not value:
             raise ValueError(f"manifest field {field} is missing: {path}")
+    reference = data.get("auditionReferenceLufs")
+    stereo_gain = data.get("stereoAuditionGainDb")
+    guided_gain = data.get("guidedAuditionGainDb")
+    for label, value in (
+        ("auditionReferenceLufs", reference),
+        ("stereoAuditionGainDb", stereo_gain),
+        ("guidedAuditionGainDb", guided_gain),
+    ):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError(f"manifest field {label} must be numeric: {path}")
+    if stereo_gain > 1.0e-9 or guided_gain > 1.0e-9:
+        raise ValueError(f"blind audition gains must be attenuation-only: {path}")
     return data
 
 
@@ -60,7 +80,9 @@ def stable_trial_id(manifest: Path, source: str, model: str, version: str) -> st
 
 def copy_candidate(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+    # Do not preserve source timestamps or other filesystem metadata in the
+    # listener bundle. The anonymous filename should be the only visible identity.
+    shutil.copyfile(source, destination)
 
 
 def blank_candidate_rating() -> dict[str, bool]:
@@ -89,8 +111,11 @@ def main() -> int:
         seen_ids: set[str] = set()
         for manifest_path in args.manifests:
             manifest = load_manifest(manifest_path)
-            stereo = safe_audio(manifest["stereoMasterA"], "stereoMasterA")
-            guided = safe_audio(manifest["guidedMasterA"], "guidedMasterA")
+            # Blind tests must use the attenuation-only loudness-matched copies,
+            # never the raw mastering renders. Otherwise a small LUFS difference
+            # could bias preference toward the louder candidate.
+            stereo = safe_audio(manifest["stereoBlindAudition"], "stereoBlindAudition")
+            guided = safe_audio(manifest["guidedBlindAudition"], "guidedBlindAudition")
             trial_id = stable_trial_id(
                 manifest_path, manifest["source"], manifest["modelName"], manifest["modelVersion"]
             )
@@ -116,6 +141,7 @@ def main() -> int:
                 "A": "guided" if guided_is_a else "stereo",
                 "B": "stereo" if guided_is_a else "guided",
                 "evidenceMode": manifest.get("evidenceMode"),
+                "auditionReferenceLufs": manifest["auditionReferenceLufs"],
                 "issues": manifest.get("issues", []),
             })
 
@@ -142,8 +168,9 @@ def main() -> int:
         instructions = public_root / "README.txt"
         instructions.write_text(
             "Phase 5 blind source-guidance listening bundle\n\n"
-            "For each trial folder, compare A and B at matched playback level.\n"
-            "Do not inspect file metadata or the private blind-key.json.\n"
+            "For each trial folder, compare A and B at the supplied matched level.\n"
+            "The files were generated from attenuation-only LUFS-matched audition copies.\n"
+            "Do not normalize, gain-match again, inspect metadata, or open the private blind-key.json.\n"
             "Fill one responses.jsonl record per trial. blindPreference must be A, B, or tie.\n"
             "Score the A and B candidate flags separately. Do not guess which one is guided.\n"
             "Set damage/side-effect flags only when you can hear the problem reliably.\n"

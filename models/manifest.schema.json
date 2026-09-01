@@ -1,21 +1,88 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AudioMasteringTool model manifest",
+  "title": "AudioMasteringTool production separation model package",
   "type": "object",
-  "required": ["id", "version", "source", "artifact", "sha256", "runtime", "codeLicense", "weightsLicense", "commercialUse", "attribution", "ramMb", "vramMb", "securityReview"],
+  "required": [
+    "id",
+    "version",
+    "task",
+    "source",
+    "weightProvenance",
+    "artifact",
+    "sha256",
+    "runtime",
+    "codeLicense",
+    "weightsLicense",
+    "commercialUseReviewed",
+    "commercialUse",
+    "redistributionReviewed",
+    "redistributionAllowed",
+    "attribution",
+    "ramMb",
+    "vramMb",
+    "securityReview",
+    "benchmarkRecord",
+    "executionProviders",
+    "inputSampleRate",
+    "stemTaxonomy",
+    "onnxContract"
+  ],
   "properties": {
     "id": {"type": "string", "minLength": 1},
     "version": {"type": "string", "minLength": 1},
+    "task": {"const": "source-separation"},
     "source": {"type": "string", "minLength": 1},
+    "weightProvenance": {"type": "string", "minLength": 1},
     "artifact": {"type": "string", "minLength": 1},
     "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
-    "runtime": {"type": "string", "minLength": 1},
+    "runtime": {"const": "onnxruntime-worker-v1"},
     "codeLicense": {"type": "string", "minLength": 1},
     "weightsLicense": {"type": "string", "minLength": 1},
+    "commercialUseReviewed": {"type": "boolean"},
     "commercialUse": {"type": "boolean"},
+    "redistributionReviewed": {"type": "boolean"},
+    "redistributionAllowed": {"type": "boolean"},
     "attribution": {"type": "string"},
     "ramMb": {"type": "integer", "minimum": 0},
     "vramMb": {"type": "integer", "minimum": 0},
-    "securityReview": {"type": "string", "enum": ["pending", "approved", "rejected"]}
-  }
+    "securityReview": {"type": "string", "enum": ["pending", "approved", "rejected"]},
+    "benchmarkRecord": {"type": "string", "minLength": 1},
+    "executionProviders": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "enum": ["cpu", "cuda"]}
+    },
+    "inputSampleRate": {"type": "integer", "minimum": 8000, "maximum": 384000},
+    "stemTaxonomy": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["vocals", "drums", "bass", "other", "kick", "snare", "percussion", "tonal"]
+      }
+    },
+    "onnxContract": {
+      "type": "object",
+      "required": [
+        "inputTensor",
+        "outputTensor",
+        "chunkFrames",
+        "overlapFrames",
+        "calibratedOutputConfidence",
+        "completeReconstruction"
+      ],
+      "properties": {
+        "inputTensor": {"type": "string", "minLength": 1},
+        "outputTensor": {"type": "string", "minLength": 1},
+        "chunkFrames": {"type": "integer", "minimum": 4096, "maximum": 2097152},
+        "overlapFrames": {"type": "integer", "minimum": 0},
+        "calibratedOutputConfidence": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "completeReconstruction": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }

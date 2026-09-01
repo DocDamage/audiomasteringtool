@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include "amt/analysis/DeepAnalysis.h"
 #include "amt/analysis/FileAnalyzer.h"
 #include "amt/codec/AudioIO.h"
 #include "amt/codec/SndFileCodec.h"
@@ -20,11 +21,12 @@
 namespace {
 
 void usage() {
-  std::cout << "AudioMasteringTool Phase 2 CLI\n"
+  std::cout << "AudioMasteringTool Phase 3 CLI\n"
             << "  amt_cli --version\n"
             << "  amt_cli codec-status\n"
             << "  amt_cli probe <input>\n"
             << "  amt_cli analyze <input>\n"
+            << "  amt_cli deep-analyze <input> [--json]\n"
             << "  amt_cli plan <input>\n"
             << "  amt_cli master <input> <output-directory> [--bits 16|24|32|float]\n"
             << "  amt_cli audition <original> <master-a> <master-b>\n"
@@ -85,6 +87,71 @@ void print_analysis(const amt::analysis::Phase1AnalysisReport& report) {
             << "waveform_levels=" << report.waveform.levels.size() << '\n';
 }
 
+void print_deep_analysis(const amt::analysis::AnalysisReport& report) {
+  print_analysis(report.technical);
+  std::cout << std::fixed << std::setprecision(3)
+            << "\nSTRUCTURE\n"
+            << "tempo_bpm=" << report.structural.tempo.bpm
+            << " confidence=" << report.structural.tempo.confidence << '\n'
+            << "onset_density_per_second=" << report.structural.tempo.onset_density_per_second << '\n'
+            << "macro_dynamic_range_db=" << report.structural.macro_dynamics.macro_dynamic_range_db << '\n'
+            << "section_contrast_db=" << report.structural.macro_dynamics.section_contrast_db << '\n'
+            << "sections=" << report.structural.sections.size() << '\n';
+  for (std::size_t index = 0; index < report.structural.sections.size(); ++index) {
+    const auto& section = report.structural.sections[index];
+    std::cout << "  [" << index << "] " << section.start_seconds << "-" << section.end_seconds
+              << "s " << section.label_hint << " energy=" << section.energy_dbfs
+              << " dBFS transient_density=" << section.transient_density
+              << " width=" << section.stereo_width << " confidence=" << section.confidence << '\n';
+  }
+
+  std::cout << "\nPERCEPTUAL HEURISTICS\n"
+            << "harshness=" << report.perceptual.harshness_score
+            << " mud=" << report.perceptual.mud_score
+            << " sub_buildup=" << report.perceptual.sub_buildup_score
+            << " brightness=" << report.perceptual.brightness_score
+            << " tonal_imbalance=" << report.perceptual.tonal_imbalance_score << '\n';
+  for (const auto& resonance : report.perceptual.resonances) {
+    std::cout << "  resonance " << resonance.frequency_hz << " Hz prominence="
+              << resonance.prominence_db << " dB persistence=" << resonance.persistence
+              << " severity=" << resonance.severity;
+    if (resonance.last_seen_seconds > resonance.first_seen_seconds) {
+      std::cout << " range=" << resonance.first_seen_seconds << "-" << resonance.last_seen_seconds << "s";
+    }
+    std::cout << '\n';
+  }
+
+  std::cout << "\nCHARACTER / DEFECT HEURISTICS\n"
+            << "hard_clip_likelihood=" << report.character.hard_clip_likelihood << '\n'
+            << "saturation_likelihood=" << report.character.saturation_likelihood << '\n'
+            << "intentional_character_likelihood=" << report.character.intentional_character_likelihood << '\n'
+            << "accidental_defect_risk=" << report.character.accidental_defect_risk << '\n'
+            << "inference_confidence=" << report.character.inference_confidence << '\n';
+
+  std::cout << "\nMIX HEALTH V1 — heuristic assessment, not an objective quality score\n"
+            << "overall=" << report.mix_health.overall_heuristic_score
+            << " confidence=" << report.mix_health.overall_confidence
+            << " assessment=" << report.mix_health.overall_assessment << '\n';
+  for (const auto& dimension : report.mix_health.dimensions) {
+    std::cout << "  " << dimension.label << ": " << dimension.heuristic_score
+              << " confidence=" << dimension.confidence
+              << " assessment=" << dimension.assessment << '\n';
+  }
+
+  std::cout << "\nFINDINGS\n";
+  for (const auto& finding : report.findings) {
+    std::cout << "[" << amt::analysis::finding_severity_name(finding.severity) << "] ["
+              << amt::analysis::finding_category_name(finding.category) << "] " << finding.title
+              << " — confidence " << finding.confidence
+              << (finding.heuristic ? " (heuristic)" : " (measurement)") << '\n'
+              << "  " << finding.detail << '\n';
+    if (finding.has_time_range) {
+      std::cout << "  range: " << finding.start_seconds << "-" << finding.end_seconds << " s\n";
+    }
+    for (const auto& evidence : finding.evidence) std::cout << "  evidence: " << evidence << '\n';
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -136,6 +203,21 @@ int main(int argc, char** argv) {
       return 1;
     }
     print_analysis(*report);
+    return 0;
+  }
+
+  if (command == "deep-analyze" && (argc == 3 || argc == 4)) {
+    if (argc == 4 && std::string(argv[3]) != "--json") {
+      usage();
+      return 2;
+    }
+    const auto report = amt::analysis::analyze_track(codecs, argv[2], error);
+    if (!report) {
+      std::cerr << "deep analysis failed: " << error << '\n';
+      return 1;
+    }
+    if (argc == 4) std::cout << amt::analysis::analysis_report_to_json(*report) << '\n';
+    else print_deep_analysis(*report);
     return 0;
   }
 

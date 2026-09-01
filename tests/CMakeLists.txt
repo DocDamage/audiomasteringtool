@@ -51,3 +51,10 @@ target_link_libraries(amt_phase4_tests PRIVATE
   amt_project
 )
 add_test(NAME phase4_project_history_and_export_recipes COMMAND amt_phase4_tests)
+
+add_executable(amt_phase5_tests phase5_tests.cpp)
+target_link_libraries(amt_phase5_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_source_guided_separation_policy COMMAND amt_phase5_tests)

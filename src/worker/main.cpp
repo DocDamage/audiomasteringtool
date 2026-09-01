@@ -31,11 +31,8 @@ std::string json_escape(const std::string& text) {
       case '\r': output << "\\r"; break;
       case '\t': output << "\\t"; break;
       default:
-        if (c < 0x20U) {
-          output << "?";
-        } else {
-          output << static_cast<char>(c);
-        }
+        if (c < 0x20U) output << "?";
+        else output << static_cast<char>(c);
         break;
     }
   }
@@ -276,9 +273,11 @@ std::string utf8_from_wide(const wchar_t* value) {
   const int required = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0,
                                             nullptr, nullptr);
   if (required <= 1) return {};
-  std::string output(static_cast<std::size_t>(required - 1), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, value, -1, output.data(), required,
-                      nullptr, nullptr);
+  std::string output(static_cast<std::size_t>(required), '\0');
+  const int written = WideCharToMultiByte(CP_UTF8, 0, value, -1, output.data(),
+                                           required, nullptr, nullptr);
+  if (written <= 1) return {};
+  output.resize(static_cast<std::size_t>(written - 1));
   return output;
 }
 #endif

@@ -27,6 +27,8 @@ namespace amt::worker {
 namespace {
 
 constexpr std::size_t kReadBlockFrames = 8192U;
+constexpr double kModelInputMaximum = 1.0;
+constexpr double kModelInputTolerance = 1.0e-6;
 
 [[nodiscard]] bool safe_stem_name(const std::string& name) {
   if (name.empty() || name.size() > 64U) return false;
@@ -191,8 +193,21 @@ bool read_window(amt::codec::IAudioDecoder& decoder,
     const auto left = block.channel(0U);
     const auto right = source_channels == 1 ? left : block.channel(1U);
     for (std::size_t frame = 0U; frame < read; ++frame) {
-      input[frames_read + frame] = left[frame];
-      input[chunk_frames + frames_read + frame] = right[frame];
+      const float left_sample = left[frame];
+      const float right_sample = right[frame];
+      if (!std::isfinite(left_sample) || !std::isfinite(right_sample)) {
+        error = "source audio contains a non-finite sample and cannot be sent to the separation model";
+        return false;
+      }
+      if (std::abs(static_cast<double>(left_sample)) >
+              kModelInputMaximum + kModelInputTolerance ||
+          std::abs(static_cast<double>(right_sample)) >
+              kModelInputMaximum + kModelInputTolerance) {
+        error = "source audio exceeds the separation model's documented [-1, 1] input range";
+        return false;
+      }
+      input[frames_read + frame] = left_sample;
+      input[chunk_frames + frames_read + frame] = right_sample;
     }
     frames_read += read;
   }
@@ -269,6 +284,13 @@ void save_tail(const float* output,
   }
 }
 
+[[nodiscard]] double reference_fade_fraction(const std::size_t frame,
+                                             const std::size_t overlap_frames) {
+  if (overlap_frames <= 1U) return 1.0;
+  return static_cast<double>(frame) /
+         static_cast<double>(overlap_frames - 1U);
+}
+
 bool write_output_span(const float* output,
                        const std::size_t stem_count,
                        const std::size_t chunk_frames,
@@ -290,8 +312,7 @@ bool write_output_span(const float* output,
           return false;
         }
         if (blend_previous_tail && frame < overlap_frames) {
-          const double t = static_cast<double>(frame + 1U) /
-                           static_cast<double>(overlap_frames + 1U);
+          const double t = reference_fade_fraction(frame, overlap_frames);
           const float previous = tails[stem][channel * overlap_frames + frame];
           value = static_cast<float>(static_cast<double>(previous) * (1.0 - t) +
                                      static_cast<double>(value) * t);

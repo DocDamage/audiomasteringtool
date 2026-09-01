@@ -210,7 +210,8 @@ bool write_atomic(const std::filesystem::path& path, const std::string& content,
          << "cache_key=" << hex_encode(canonical_cache_key(entry.key)) << '\n'
          << "sample_rate=" << entry.sample_rate << '\n'
          << "frames=" << entry.frames << '\n'
-         << "overall_confidence=" << entry.overall_confidence << '\n';
+         << "overall_confidence=" << entry.overall_confidence << '\n'
+         << "complete_reconstruction=" << (entry.complete_reconstruction ? 1 : 0) << '\n';
   for (const auto& artifact : entry.artifacts) {
     output << "artifact=" << artifact_kind_name(artifact.kind) << '\t'
            << stem_role_name(artifact.role) << '\t'
@@ -485,6 +486,13 @@ std::optional<SeparationCacheEntry> SeparationCache::load_complete(
       if (parsed && *parsed >= 0.0 && *parsed <= 1.0) {
         entry.overall_confidence = *parsed;
         confidence_ok = true;
+      }
+      continue;
+    }
+    if (line.rfind("complete_reconstruction=", 0U) == 0U) {
+      const auto parsed = parse_int64(line.substr(24U));
+      if (parsed && (*parsed == 0 || *parsed == 1)) {
+        entry.complete_reconstruction = *parsed == 1;
       }
       continue;
     }

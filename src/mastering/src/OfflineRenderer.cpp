@@ -18,10 +18,7 @@ constexpr std::size_t kRenderFrames = 8192U;
 double db_to_linear(const double db) { return std::pow(10.0, db / 20.0); }
 
 std::filesystem::path temp_path_for(const std::filesystem::path& output, const char* suffix) {
-  auto path = output;
-  path += suffix;
-  path.replace_extension(".wav");
-  return path;
+  return output.parent_path() / (output.stem().string() + suffix + ".wav");
 }
 
 void remove_if_exists(const std::filesystem::path& path) {
@@ -114,8 +111,10 @@ std::optional<RenderResult> render_candidate(
 
   const auto temp_render = temp_path_for(output, ".amt-render");
   const auto temp_adjusted = temp_path_for(output, ".amt-adjusted");
+  const auto temp_safety = temp_path_for(output, ".amt-safety");
   remove_if_exists(temp_render);
   remove_if_exists(temp_adjusted);
+  remove_if_exists(temp_safety);
 
   if (!render_graph_to_float(codecs, input, temp_render, candidate.graph, error,
                              cancellation, progress)) {
@@ -132,7 +131,7 @@ std::optional<RenderResult> render_candidate(
 
   const double loudness_correction = candidate.target_lufs - preliminary->loudness.integrated_lufs;
   const double peak_headroom = candidate.ceiling_dbtp - preliminary->loudness.true_peak_dbtp;
-  const double correction = std::clamp(std::min(loudness_correction, peak_headroom), -6.0, 3.0);
+  double correction = std::clamp(std::min(loudness_correction, peak_headroom), -12.0, 3.0);
   std::filesystem::path export_source = temp_render;
   if (std::abs(correction) > 0.025) {
     if (!apply_gain_to_float(codecs, temp_render, temp_adjusted, correction, error, cancellation)) {
@@ -148,17 +147,42 @@ std::optional<RenderResult> render_candidate(
   export_request.sample_format = settings.sample_format;
   if (!amt::codec::export_audio(codecs, export_source, output, export_request, error,
                                 cancellation, [&](const double value) {
-                                  amt::core::report_progress(progress, 0.68 + value * 0.20);
+                                  amt::core::report_progress(progress, 0.68 + value * 0.18);
                                 })) {
     remove_if_exists(temp_render);
     remove_if_exists(temp_adjusted);
     return std::nullopt;
   }
 
-  const auto final_analysis = amt::analysis::analyze_file(codecs, output, error, cancellation);
+  auto final_analysis = amt::analysis::analyze_file(codecs, output, error, cancellation);
+  if (!final_analysis) {
+    remove_if_exists(temp_render);
+    remove_if_exists(temp_adjusted);
+    return std::nullopt;
+  }
+
+  if (final_analysis->loudness.true_peak_dbtp > candidate.ceiling_dbtp + 0.02) {
+    const double safety_gain = candidate.ceiling_dbtp - final_analysis->loudness.true_peak_dbtp - 0.03;
+    correction += safety_gain;
+    if (!apply_gain_to_float(codecs, output, temp_safety, safety_gain, error, cancellation) ||
+        !amt::codec::export_audio(codecs, temp_safety, output, export_request, error, cancellation)) {
+      remove_if_exists(temp_render);
+      remove_if_exists(temp_adjusted);
+      remove_if_exists(temp_safety);
+      return std::nullopt;
+    }
+    final_analysis = amt::analysis::analyze_file(codecs, output, error, cancellation);
+    if (!final_analysis) {
+      remove_if_exists(temp_render);
+      remove_if_exists(temp_adjusted);
+      remove_if_exists(temp_safety);
+      return std::nullopt;
+    }
+  }
+
   remove_if_exists(temp_render);
   remove_if_exists(temp_adjusted);
-  if (!final_analysis) return std::nullopt;
+  remove_if_exists(temp_safety);
   amt::core::report_progress(progress, 1.0);
 
   RenderResult result;
@@ -166,9 +190,9 @@ std::optional<RenderResult> render_candidate(
   result.analysis = *final_analysis;
   result.final_gain_correction_db = correction;
   result.loudness_error_lu = final_analysis->loudness.integrated_lufs - candidate.target_lufs;
-  result.peak_ceiling_met = final_analysis->loudness.true_peak_dbtp <= candidate.ceiling_dbtp + 0.10;
+  result.peak_ceiling_met = final_analysis->loudness.true_peak_dbtp <= candidate.ceiling_dbtp + 0.05;
   if (settings.verify_output && !result.peak_ceiling_met) {
-    error = "render exceeded true-peak ceiling after final encode";
+    error = "render exceeded true-peak ceiling after safety correction";
     return std::nullopt;
   }
   return result;
@@ -202,11 +226,11 @@ std::optional<MasteringRenderPair> render_mastering_plan(
                                   });
   if (!b) return std::nullopt;
 
-  MasteringRenderPair pair{.master_a = *a,
-                           .master_b = *b,
-                           .audition = make_loudness_match_profile(
-                               source_analysis.loudness, a->analysis.loudness, b->analysis.loudness)};
-  return pair;
+  return MasteringRenderPair{.master_a = *a,
+                             .master_b = *b,
+                             .audition = make_loudness_match_profile(
+                                 source_analysis.loudness, a->analysis.loudness,
+                                 b->analysis.loudness)};
 }
 
 }  // namespace amt::mastering

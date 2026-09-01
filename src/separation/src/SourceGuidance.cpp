@@ -7,6 +7,8 @@
 #include <system_error>
 #include <utility>
 
+#include "amt/core/FileFingerprint.h"
+
 namespace amt::separation {
 namespace {
 
@@ -230,11 +232,28 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
   }
 
   auto separation_request = request.separation;
-  const auto cache_key = cache_key_for(request, model);
+  auto cache_key = cache_key_for(request, model);
   bool cache_enabled = config.enable_cache && cache_ != nullptr;
   if (cache_enabled && cache_key.source_fingerprint.empty()) {
-    cache_enabled = false;
-    output.warnings.emplace_back("separation cache skipped because no stable source fingerprint was supplied");
+    if (config.compute_missing_source_fingerprint) {
+      std::string fingerprint_error;
+      const auto fingerprint = amt::core::fingerprint_file_sha256(
+          request.separation.source_path, fingerprint_error, cancellation,
+          [&](const double value) { amt::core::report_progress(progress, value * 0.10); });
+      if (fingerprint) {
+        cache_key.source_fingerprint = fingerprint->sha256;
+      } else if (cancellation != nullptr && cancellation->is_cancelled()) {
+        error = "source-guidance evaluation cancelled";
+        return std::nullopt;
+      } else {
+        cache_enabled = false;
+        output.warnings.emplace_back("separation cache disabled because the source could not be fingerprinted: " +
+                                     fingerprint_error);
+      }
+    } else {
+      cache_enabled = false;
+      output.warnings.emplace_back("separation cache skipped because no stable source fingerprint was supplied");
+    }
   }
 
   if (cache_enabled) {
@@ -267,7 +286,7 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
     std::string provider_error;
     auto separated = provider_.separate(
         separation_request, provider_error, cancellation,
-        [&](const double value) { amt::core::report_progress(progress, value * 0.70); });
+        [&](const double value) { amt::core::report_progress(progress, 0.10 + value * 0.60); });
     if (!separated) {
       if (cancellation != nullptr && cancellation->is_cancelled()) {
         error = "source-guidance evaluation cancelled";
@@ -307,14 +326,16 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
     return std::nullopt;
   }
 
-  ArtifactAssessment artifact_assessment = unknown_artifacts;
-  if (artifact_evaluator_ != nullptr && has_stem_audio(*output.separation)) {
+  ArtifactAssessment artifact_for_policy = unknown_artifacts;
+  if (request.evidence.reconstruction_required_for_full_repair &&
+      artifact_evaluator_ != nullptr && has_stem_audio(*output.separation)) {
     std::string artifact_error;
     const auto assessed = artifact_evaluator_->evaluate(
         request.separation.source_path, *output.separation, artifact_error, cancellation,
         [&](const double value) { amt::core::report_progress(progress, 0.70 + value * 0.30); });
     if (assessed) {
-      artifact_assessment = *assessed;
+      artifact_for_policy = *assessed;
+      output.artifact_assessment = *assessed;
     } else if (cancellation != nullptr && cancellation->is_cancelled()) {
       error = "source-guidance evaluation cancelled";
       return std::nullopt;
@@ -329,18 +350,17 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
     }
     amt::core::report_progress(progress, 1.0);
   }
-  output.artifact_assessment = artifact_assessment;
 
   auto effective_evidence = request.evidence;
   effective_evidence.model_confidence = clamp01(output.separation->overall_confidence);
   effective_evidence.source_guidance_confidence =
       std::min(clamp01(request.evidence.source_guidance_confidence),
                effective_evidence.model_confidence);
-  output.decision = choose_separation_mode(effective_evidence, artifact_assessment, config.policy);
+  output.decision = choose_separation_mode(effective_evidence, artifact_for_policy, config.policy);
 
   if (output.decision.mode == SeparationMode::stem_reconstruction &&
       !has_stem_audio(*output.separation)) {
-    ArtifactAssessment reconstruction_blocked = artifact_assessment;
+    ArtifactAssessment reconstruction_blocked = artifact_for_policy;
     reconstruction_blocked.overall_risk = 1.0;
     reconstruction_blocked.confidence = 0.0;
     output.decision = choose_separation_mode(effective_evidence, reconstruction_blocked,

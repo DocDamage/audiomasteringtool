@@ -652,10 +652,9 @@ std::optional<ModelRegistrySelection> load_model_registry_selection(
     selection.warnings.insert(selection.warnings.end(), eligibility.blockers.begin(),
                               eligibility.blockers.end());
   }
-  if (!std::filesystem::exists(selection.active_separation_model->model_artifact)) {
-    selection.warnings.emplace_back(
-        "active separation model artifact is not present in the packaged models directory");
-  }
+  // Model artifacts may be intentionally first-run installed to a per-user
+  // writable model store. Absence beside the packaged registry is therefore not
+  // a warning; ModelArtifactInstaller is the authority for install/verification.
   if (!std::filesystem::exists(worker_executable)) {
     selection.warnings.emplace_back(
         "isolated separation worker executable is not present in the application package");

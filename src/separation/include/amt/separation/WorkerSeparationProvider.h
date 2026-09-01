@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>

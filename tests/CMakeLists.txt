@@ -94,6 +94,18 @@ target_link_libraries(amt_phase5_source_control_tests PRIVATE
 )
 add_test(NAME phase5_source_control_envelopes COMMAND amt_phase5_source_control_tests)
 
+add_executable(amt_phase5_source_issue_inference_tests phase5_source_issue_inference_tests.cpp)
+target_link_libraries(amt_phase5_source_issue_inference_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_codec
+  amt_analysis
+  amt_dsp
+  amt_mastering
+  amt_separation
+)
+add_test(NAME phase5_source_issue_inference COMMAND amt_phase5_source_issue_inference_tests)
+
 add_executable(amt_phase5_source_guided_executor_tests phase5_source_guided_executor_tests.cpp)
 target_link_libraries(amt_phase5_source_guided_executor_tests PRIVATE
   amt_core

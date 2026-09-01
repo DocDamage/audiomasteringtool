@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "amt/mastering/SourceGuidedMastering.h"
+#include "amt/separation/ModelArtifactInstaller.h"
 #include "amt/separation/ModelRegistry.h"
 #include "amt/separation/SourceGuidedWorkflow.h"
 #include "amt/separation/WorkerSeparationProvider.h"
@@ -25,6 +26,7 @@ struct PreparedGuidance {
   std::vector<amt::separation::SourceGuidedIssue> issues;
   bool capability_available{false};
   bool analysis_performed{false};
+  bool automatic_mode1_approved{false};
 };
 
 [[nodiscard]] bool cancelled(const amt::core::CancellationToken* cancellation) noexcept {
@@ -133,8 +135,27 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
     return prepared;
   }
 
-  amt::separation::WorkerSeparationProvider provider(
-      *selection->active_separation_model);
+  auto provider_config = *selection->active_separation_model;
+  std::string install_error;
+  const auto install = amt::separation::ensure_model_artifact_installed(
+      provider_config, install_error, cancellation,
+      [&](const double value) {
+        amt::core::report_progress(progress, value * 0.28);
+      });
+  if (!install) {
+    if (cancelled(cancellation)) {
+      error = install_error.empty() ? "mastering cancelled" : install_error;
+      return std::nullopt;
+    }
+    auto prepared = stereo_fallback(
+        "source guidance unavailable; the trusted separation model could not be installed or verified",
+        {"Source guidance unavailable — stereo mastering used",
+         install_error.empty() ? "trusted model installation was unavailable" : install_error});
+    append_unique(prepared.guidance.warnings, selection->warnings);
+    return prepared;
+  }
+
+  amt::separation::WorkerSeparationProvider provider(provider_config);
   amt::separation::SeparationCache cache(
       output_directory.parent_path() / "separation-cache");
   amt::separation::SourceGuidanceOrchestrator orchestrator(provider, nullptr, &cache);
@@ -155,7 +176,7 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
       orchestrator, codecs, source_analysis, std::move(request), workflow_error,
       workflow_config, cancellation,
       [&](const double value) {
-        amt::core::report_progress(progress, value);
+        amt::core::report_progress(progress, 0.28 + value * 0.72);
       });
   if (!workflow) {
     if (cancelled(cancellation)) {
@@ -177,6 +198,18 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   prepared.analysis_performed = workflow->source_estimates_analyzed;
   prepared.capability_available = workflow->source_estimates_analyzed &&
                                   prepared.guidance.separation.has_value();
+  prepared.automatic_mode1_approved = provider_config.automatic_mode1_approved;
+
+  if (!prepared.automatic_mode1_approved &&
+      prepared.guidance.decision.mode ==
+          amt::separation::SeparationMode::source_guided_stereo) {
+    prepared.guidance.decision.mode = amt::separation::SeparationMode::stereo_mastering;
+    prepared.guidance.decision.reasons.emplace_back(
+        "source-estimate diagnostics are available, but automatic source-guided audio changes are not yet approved for this model configuration");
+    prepared.guidance.warnings.emplace_back(
+        "Source guidance diagnostics available — stereo mastering used until automatic Mode 1 calibration is approved");
+  }
+
   append_unique(prepared.guidance.warnings, selection->warnings);
   append_unique(prepared.guidance.warnings, workflow->warnings);
   return prepared;
@@ -214,6 +247,8 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
   plan = std::move(result->effective_plan);
   if (result->source_guidance_applied) {
     add_mode_rationale(plan, "Source guidance used");
+  } else if (prepared->analysis_performed && !prepared->automatic_mode1_approved) {
+    add_mode_rationale(plan, "Source guidance unavailable — stereo mastering used");
   } else if (!prepared->capability_available ||
              result->requested_mode != amt::separation::SeparationMode::stereo_mastering) {
     add_mode_rationale(plan, "Source guidance unavailable — stereo mastering used");

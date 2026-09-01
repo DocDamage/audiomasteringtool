@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -43,6 +44,10 @@ constexpr int kStopButtonId = 1004;
 constexpr int kExportButtonId = 1005;
 constexpr int kCancelButtonId = 1006;
 constexpr int kSeekId = 1101;
+
+HMENU control_menu(const int id) noexcept {
+  return reinterpret_cast<HMENU>(static_cast<INT_PTR>(id));
+}
 
 struct AppState {
   amt::codec::SndFileCodecService codecs;
@@ -172,8 +177,8 @@ void update_metrics_text(AppState& state) {
 void layout_controls(AppState& state) {
   RECT client{};
   GetClientRect(state.window, &client);
-  const int width = client.right - client.left;
-  const int height = client.bottom - client.top;
+  const int width = static_cast<int>(client.right - client.left);
+  const int height = static_cast<int>(client.bottom - client.top);
   constexpr int margin = 12;
   constexpr int button_height = 30;
   constexpr int button_width = 92;
@@ -201,9 +206,10 @@ void layout_controls(AppState& state) {
 RECT waveform_rect(HWND window) {
   RECT client{};
   GetClientRect(window, &client);
-  const int height = client.bottom - client.top;
+  const int height = static_cast<int>(client.bottom - client.top);
   const int waveform_height = std::max(120, std::min(260, height / 3));
-  return RECT{12, 80, std::max(13L, client.right - 12), 80 + waveform_height};
+  return RECT{12, 80, std::max<LONG>(13, client.right - 12),
+              static_cast<LONG>(80 + waveform_height)};
 }
 
 void draw_waveform(AppState& state, HDC dc) {
@@ -224,7 +230,7 @@ void draw_waveform(AppState& state, HDC dc) {
   }
 
   const auto& levels = state.report->waveform.levels;
-  const int width = std::max(1, area.right - area.left);
+  const int width = std::max(1, static_cast<int>(area.right - area.left));
   const amt::audio::WaveformLevel* level = &levels.back();
   for (const auto& candidate : levels) {
     if (!candidate.channels.empty() &&
@@ -240,13 +246,15 @@ void draw_waveform(AppState& state, HDC dc) {
   HPEN wave_pen = CreatePen(PS_SOLID, 1, RGB(71, 197, 214));
   HPEN previous = static_cast<HPEN>(SelectObject(dc, center_pen));
 
-  const int total_height = area.bottom - area.top;
+  const int total_height = static_cast<int>(area.bottom - area.top);
   for (std::size_t channel = 0; channel < displayed_channels; ++channel) {
-    const int channel_top = area.top +
-        static_cast<int>((static_cast<std::int64_t>(total_height) * channel) /
+    const int channel_top = static_cast<int>(area.top) +
+        static_cast<int>((static_cast<std::int64_t>(total_height) *
+                          static_cast<std::int64_t>(channel)) /
                          static_cast<std::int64_t>(displayed_channels));
-    const int channel_bottom = area.top +
-        static_cast<int>((static_cast<std::int64_t>(total_height) * (channel + 1U)) /
+    const int channel_bottom = static_cast<int>(area.top) +
+        static_cast<int>((static_cast<std::int64_t>(total_height) *
+                          static_cast<std::int64_t>(channel + 1U)) /
                          static_cast<std::int64_t>(displayed_channels));
     const int center = (channel_top + channel_bottom) / 2;
     MoveToEx(dc, area.left, center, nullptr);
@@ -265,8 +273,8 @@ void draw_waveform(AppState& state, HDC dc) {
       const double maximum = std::clamp(static_cast<double>(bin.maximum), -1.2, 1.2);
       const int y_min = center - static_cast<int>(std::lround(maximum * scale));
       const int y_max = center - static_cast<int>(std::lround(minimum * scale));
-      MoveToEx(dc, area.left + pixel, y_min, nullptr);
-      LineTo(dc, area.left + pixel, y_max + 1);
+      MoveToEx(dc, static_cast<int>(area.left) + pixel, y_min, nullptr);
+      LineTo(dc, static_cast<int>(area.left) + pixel, y_max + 1);
     }
     SelectObject(dc, center_pen);
   }
@@ -278,7 +286,7 @@ void draw_waveform(AppState& state, HDC dc) {
   if (state.metadata && state.metadata->frames > 0) {
     const auto frame = std::clamp<std::int64_t>(
         state.transport.playhead_frame(), 0, state.metadata->frames);
-    const int x = area.left + static_cast<int>(
+    const int x = static_cast<int>(area.left) + static_cast<int>(
         (static_cast<long double>(frame) * width) /
         static_cast<long double>(state.metadata->frames));
     HPEN playhead_pen = CreatePen(PS_SOLID, 1, RGB(240, 240, 240));
@@ -322,7 +330,9 @@ bool load_source(AppState& state, const std::filesystem::path& path) {
   status << L"Loaded: " << path.filename().wstring() << L" — "
          << metadata->sample_rate << L" Hz, " << metadata->channels << L" ch, "
          << metadata->bit_depth << L" bit";
-  if (!state.playable) status << L" — analysis/export available; native playback is mono/stereo in Phase 1";
+  if (!state.playable) {
+    status << L" — analysis/export available; native playback is mono/stereo in Phase 1";
+  }
   set_status(state, status.str());
   InvalidateRect(state.window, nullptr, FALSE);
   return true;
@@ -341,8 +351,10 @@ void choose_source(AppState& state) {
 }
 
 void begin_analysis(AppState& state) {
-  if (!state.metadata || state.job_running.exchange(true, std::memory_order_acq_rel)) return;
+  if (!state.metadata || state.job_running.load(std::memory_order_acquire)) return;
   join_completed_worker(state);
+  if (state.job_running.exchange(true, std::memory_order_acq_rel)) return;
+
   auto cancellation = std::make_shared<amt::core::CancellationToken>();
   state.cancellation = cancellation;
   {
@@ -378,7 +390,7 @@ void begin_analysis(AppState& state) {
 
 std::optional<std::filesystem::path> choose_export_path(AppState& state) {
   wchar_t path_buffer[32768]{};
-  std::wstring suggested = state.source_path.stem().wstring() + L"_pass-through.wav";
+  const std::wstring suggested = state.source_path.stem().wstring() + L"_pass-through";
   const auto copy_count = std::min<std::size_t>(suggested.size(), std::size(path_buffer) - 1U);
   std::copy_n(suggested.c_str(), copy_count, path_buffer);
 
@@ -388,17 +400,34 @@ std::optional<std::filesystem::path> choose_export_path(AppState& state) {
   dialog.lpstrFilter = L"WAV (*.wav)\0*.wav\0AIFF (*.aiff)\0*.aiff\0FLAC (*.flac)\0*.flac\0\0";
   dialog.lpstrFile = path_buffer;
   dialog.nMaxFile = static_cast<DWORD>(std::size(path_buffer));
-  dialog.lpstrDefExt = L"wav";
+  dialog.nFilterIndex = 1U;
   dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
   if (GetSaveFileNameW(&dialog) == FALSE) return std::nullopt;
-  return std::filesystem::path(path_buffer);
+
+  std::filesystem::path output(path_buffer);
+  if (!output.has_extension()) {
+    switch (dialog.nFilterIndex) {
+      case 2U:
+        output += L".aiff";
+        break;
+      case 3U:
+        output += L".flac";
+        break;
+      default:
+        output += L".wav";
+        break;
+    }
+  }
+  return output;
 }
 
 void begin_export(AppState& state) {
   if (!state.metadata || state.job_running.load(std::memory_order_acquire)) return;
   const auto output = choose_export_path(state);
-  if (!output || state.job_running.exchange(true, std::memory_order_acq_rel)) return;
+  if (!output) return;
   join_completed_worker(state);
+  if (state.job_running.exchange(true, std::memory_order_acq_rel)) return;
+
   auto cancellation = std::make_shared<amt::core::CancellationToken>();
   state.cancellation = cancellation;
   {
@@ -504,32 +533,32 @@ void update_transport_ui(AppState& state) {
 }
 
 void create_controls(AppState& state) {
-  const DWORD button_style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+  constexpr DWORD button_style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
   state.open_button = CreateWindowExW(0, L"BUTTON", L"Open", button_style,
                                       0, 0, 0, 0, state.window,
-                                      reinterpret_cast<HMENU>(kOpenButtonId), nullptr, nullptr);
+                                      control_menu(kOpenButtonId), nullptr, nullptr);
   state.analyze_button = CreateWindowExW(0, L"BUTTON", L"Analyze", button_style,
                                          0, 0, 0, 0, state.window,
-                                         reinterpret_cast<HMENU>(kAnalyzeButtonId), nullptr, nullptr);
+                                         control_menu(kAnalyzeButtonId), nullptr, nullptr);
   state.play_button = CreateWindowExW(0, L"BUTTON", L"Play", button_style,
                                       0, 0, 0, 0, state.window,
-                                      reinterpret_cast<HMENU>(kPlayButtonId), nullptr, nullptr);
+                                      control_menu(kPlayButtonId), nullptr, nullptr);
   state.stop_button = CreateWindowExW(0, L"BUTTON", L"Stop", button_style,
                                       0, 0, 0, 0, state.window,
-                                      reinterpret_cast<HMENU>(kStopButtonId), nullptr, nullptr);
+                                      control_menu(kStopButtonId), nullptr, nullptr);
   state.export_button = CreateWindowExW(0, L"BUTTON", L"Export", button_style,
                                         0, 0, 0, 0, state.window,
-                                        reinterpret_cast<HMENU>(kExportButtonId), nullptr, nullptr);
+                                        control_menu(kExportButtonId), nullptr, nullptr);
   state.cancel_button = CreateWindowExW(0, L"BUTTON", L"Cancel", button_style,
                                         0, 0, 0, 0, state.window,
-                                        reinterpret_cast<HMENU>(kCancelButtonId), nullptr, nullptr);
+                                        control_menu(kCancelButtonId), nullptr, nullptr);
   state.status = CreateWindowExW(0, L"STATIC", L"Open a WAV, AIFF, or FLAC file.",
                                  WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0,
                                  state.window, nullptr, nullptr, nullptr);
   state.seek = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
                                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
                                0, 0, 0, 0, state.window,
-                               reinterpret_cast<HMENU>(kSeekId), nullptr, nullptr);
+                               control_menu(kSeekId), nullptr, nullptr);
   SendMessageW(state.seek, TBM_SETRANGE, TRUE, MAKELONG(0, kSeekRange));
   state.progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE,
                                    0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);

@@ -1,6 +1,5 @@
 #include <cassert>
 #include <filesystem>
-#include <fstream>
 #include <set>
 #include <string>
 
@@ -92,6 +91,62 @@ void test_project_round_trip() {
   std::filesystem::remove_all(root, ignored);
 }
 
+void test_selection_history_and_stale_snapshot_merge() {
+  const auto root = std::filesystem::temp_directory_path() / "amt-phase4-selection-history-tests";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+
+  amt::project::ProjectStore store(root);
+  std::string error;
+  auto project = store.create(root / "selection.wav", error);
+  assert(error.empty());
+  project.master_a = {.available = true,
+                      .path = root / "selection_Master_A.wav",
+                      .integrated_lufs = -9.0,
+                      .true_peak_dbtp = -1.0,
+                      .recommended = true};
+  project.master_b = {.available = true,
+                      .path = root / "selection_Master_B.wav",
+                      .integrated_lufs = -11.0,
+                      .true_peak_dbtp = -1.0,
+                      .recommended = false};
+  assert(store.append_revision(project, "mastering", "Two candidates rendered.",
+                               project.master_a.path, error));
+
+  const auto before_selection_count = project.revisions.size();
+  project.selected = amt::project::CandidateSelection::master_a;
+  assert(store.save(project, error));
+  const auto selected = store.load(project.project_id, error);
+  assert(selected.has_value());
+  assert(selected->selected == amt::project::CandidateSelection::master_a);
+  assert(selected->revisions.size() == before_selection_count + 1U);
+  assert(selected->revisions.back().kind == "selection");
+  assert(selected->revisions.back().parent_id ==
+         selected->revisions[selected->revisions.size() - 2U].id);
+  assert(selected->revisions.back().output_path == project.master_a.path);
+
+  // Simulate the desktop holding the pre-selection revision vector after save().
+  // append_revision() must merge the persisted selection node instead of overwriting it.
+  assert(project.revisions.size() == before_selection_count);
+  assert(store.append_revision(project, "export", "Exported selected Master A.",
+                               project.master_a.path, error));
+  assert(project.revisions.size() == before_selection_count + 2U);
+  assert(project.revisions[project.revisions.size() - 2U].kind == "selection");
+  assert(project.revisions.back().kind == "export");
+  assert(project.revisions.back().parent_id ==
+         project.revisions[project.revisions.size() - 2U].id);
+
+  project.selected = amt::project::CandidateSelection::master_b;
+  assert(store.save(project, error));
+  const auto selected_b = store.load(project.project_id, error);
+  assert(selected_b.has_value());
+  assert(selected_b->selected == amt::project::CandidateSelection::master_b);
+  assert(selected_b->revisions.back().kind == "selection");
+  assert(selected_b->revisions.back().output_path == project.master_b.path);
+
+  std::filesystem::remove_all(root, ignored);
+}
+
 void test_revision_id_uniqueness() {
   const auto root = std::filesystem::temp_directory_path() / "amt-phase4-revision-id-tests";
   std::error_code ignored;
@@ -125,22 +180,35 @@ void test_export_recipes() {
   assert(studio->sample_format == amt::codec::AudioSampleFormat::pcm24);
   assert(!studio->sample_rate.has_value());
 
+  const auto* distribution_wav = amt::project::find_export_recipe("distribution_wav");
+  assert(distribution_wav != nullptr && distribution_wav->available);
+  assert(distribution_wav->container == amt::codec::AudioContainer::wav);
+  assert(distribution_wav->sample_format == amt::codec::AudioSampleFormat::pcm24);
+
+  const auto* distribution_flac = amt::project::find_export_recipe("distribution_flac");
+  assert(distribution_flac != nullptr && distribution_flac->available);
+  assert(distribution_flac->container == amt::codec::AudioContainer::flac);
+  assert(distribution_flac->sample_format == amt::codec::AudioSampleFormat::pcm24);
+
   const auto* cd = amt::project::find_export_recipe(amt::project::ExportRecipeId::cd);
   assert(cd != nullptr && cd->available);
   assert(cd->sample_rate == 44100);
   assert(cd->sample_format == amt::codec::AudioSampleFormat::pcm16);
   const auto cd_request = amt::project::make_export_request(*cd);
   assert(cd_request.sample_rate == 44100);
+  assert(cd_request.container == amt::codec::AudioContainer::wav);
   assert(cd_request.sample_format == amt::codec::AudioSampleFormat::pcm16);
   assert(cd_request.dither_when_reducing_integer_depth);
 
   const auto* preview = amt::project::find_export_recipe("client_preview");
   assert(preview != nullptr);
   assert(!preview->available);
+  assert(preview->container == amt::codec::AudioContainer::mp3);
   assert(!preview->unavailable_reason.empty());
 
   const auto* archive = amt::project::find_export_recipe("archive_float");
   assert(archive != nullptr && archive->available);
+  assert(archive->container == amt::codec::AudioContainer::wav);
   assert(archive->sample_format == amt::codec::AudioSampleFormat::float32);
   assert(!archive->dither_when_reducing_integer_depth);
 }
@@ -149,6 +217,7 @@ void test_export_recipes() {
 
 int main() {
   test_project_round_trip();
+  test_selection_history_and_stale_snapshot_merge();
   test_revision_id_uniqueness();
   test_export_recipes();
   return 0;

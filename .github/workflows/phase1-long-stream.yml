@@ -28,6 +28,7 @@ permissions:
 jobs:
   sixty-minute-production-path:
     runs-on: windows-latest
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:

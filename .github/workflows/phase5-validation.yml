@@ -13,6 +13,7 @@ permissions:
 jobs:
   portable-phase5:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,30 +26,30 @@ jobs:
         run: cmake --build --preset ninja-debug
       - name: Separation policy
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_separation_policy$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_separation_policy$' --timeout 180 --output-on-failure
       - name: Fingerprint/cache identity
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_fingerprint_and_cache_identity$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_fingerprint_and_cache_identity$' --timeout 180 --output-on-failure
       - name: Complete reconstruction contract
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_complete_reconstruction_contract$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_complete_reconstruction_contract$' --timeout 180 --output-on-failure
       - name: Reconstruction artifact evaluator
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_reconstruction_artifact_evaluator$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_reconstruction_artifact_evaluator$' --timeout 180 --output-on-failure
       - name: Source-guided processing plan
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_processing_plan$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_processing_plan$' --timeout 180 --output-on-failure
       - name: Source-control envelopes
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_control_envelopes$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_control_envelopes$' --timeout 180 --output-on-failure
       - name: Source-guided stereo executor
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_executor$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_executor$' --timeout 180 --output-on-failure
       - name: Source-guided stereo renderer
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_renderer$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_renderer$' --timeout 180 --output-on-failure
       - name: Source-guided mastering integration
         continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_mastering_integration$' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_mastering_integration$' --timeout 180 --output-on-failure
       - name: Enforce aggregate Phase 5 suite
-        run: ctest --preset ninja-debug -R '^phase5_' --output-on-failure
+        run: ctest --preset ninja-debug -R '^phase5_' --timeout 180 --output-on-failure

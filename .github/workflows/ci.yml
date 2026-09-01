@@ -15,6 +15,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,9 +30,9 @@ jobs:
       - name: Build Release
         run: cmake --build --preset windows-release
       - name: Unit and conformance tests (Debug)
-        run: ctest --preset windows-debug
+        run: ctest --preset windows-debug --timeout 180 --output-on-failure
       - name: Unit and conformance tests (Release)
-        run: ctest --preset windows-release
+        run: ctest --preset windows-release --timeout 180 --output-on-failure
       - name: Worker health
         run: build/windows-msvc/src/worker/Debug/amt_worker.exe --health
       - name: Worker IPC
@@ -115,6 +116,7 @@ jobs:
 
   portable-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,7 +127,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libsndfile1
       - run: cmake --preset ninja-debug
       - run: cmake --build --preset ninja-debug
-      - run: ctest --preset ninja-debug
+      - run: ctest --preset ninja-debug --timeout 180 --output-on-failure
       - run: python scripts/test_worker_ipc.py build/ninja-debug/src/worker/amt_worker
       - run: build/ninja-debug/src/cli/amt_cli codec-status
       - run: python scripts/generate_phase0_fixtures.py build/phase0-fixtures

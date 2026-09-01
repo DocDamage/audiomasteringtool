@@ -25,6 +25,7 @@
       "executionProviders": ["cpu"],
       "inputSampleRate": 44100,
       "stemTaxonomy": ["drums", "bass", "other", "vocals"],
+      "automaticMode1Approved": false,
       "onnxContract": {
         "inputTensor": "mix",
         "outputTensor": "stems",

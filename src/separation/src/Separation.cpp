@@ -112,6 +112,26 @@ constexpr double kEvidenceThreshold = 0.35;
   return fields;
 }
 
+[[nodiscard]] std::optional<double> parse_double(const std::string& value) {
+  try {
+    std::size_t consumed = 0U;
+    const double parsed = std::stod(value, &consumed);
+    return consumed == value.size() ? std::optional<double>(parsed) : std::nullopt;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+[[nodiscard]] std::optional<std::int64_t> parse_int64(const std::string& value) {
+  try {
+    std::size_t consumed = 0U;
+    const auto parsed = std::stoll(value, &consumed);
+    return consumed == value.size() ? std::optional<std::int64_t>(parsed) : std::nullopt;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
 [[nodiscard]] std::optional<std::string> read_text(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
   if (!input) return std::nullopt;
@@ -185,12 +205,17 @@ bool write_atomic(const std::filesystem::path& path, const std::string& content,
 
 [[nodiscard]] std::string manifest_text(const SeparationCacheEntry& entry) {
   std::ostringstream output;
-  output << "schema=1\n"
-         << "cache_key=" << hex_encode(canonical_cache_key(entry.key)) << '\n';
+  output << std::setprecision(17)
+         << "schema=1\n"
+         << "cache_key=" << hex_encode(canonical_cache_key(entry.key)) << '\n'
+         << "sample_rate=" << entry.sample_rate << '\n'
+         << "frames=" << entry.frames << '\n'
+         << "overall_confidence=" << entry.overall_confidence << '\n';
   for (const auto& artifact : entry.artifacts) {
     output << "artifact=" << artifact_kind_name(artifact.kind) << '\t'
            << stem_role_name(artifact.role) << '\t'
-           << hex_encode(path_to_utf8(artifact.relative_path)) << '\n';
+           << hex_encode(path_to_utf8(artifact.relative_path)) << '\t'
+           << artifact.confidence << '\n';
   }
   return output.str();
 }
@@ -292,7 +317,7 @@ SeparationDecision choose_separation_mode(
   const double net_reconstruction_benefit = decision.expected_benefit - decision.artifact_risk;
   const bool reconstruction_quality_gate =
       model_confidence >= clamp01(config.minimum_reconstruction_model_confidence) &&
-      artifact_assessment.confidence >= 0.55 &&
+      artifact_assessment.confidence >= clamp01(config.minimum_artifact_assessment_confidence) &&
       decision.artifact_risk <= clamp01(config.maximum_reconstruction_artifact_risk) &&
       net_reconstruction_benefit >= clamp01(config.minimum_reconstruction_net_benefit);
 
@@ -386,10 +411,21 @@ bool SeparationCache::mark_complete(const SeparationCacheEntry& entry,
                                     std::string& error) const {
   error.clear();
   if (!prepare(entry.key, error)) return false;
+  if (entry.sample_rate <= 0 || entry.frames < 0 ||
+      entry.overall_confidence < 0.0 || entry.overall_confidence > 1.0 ||
+      entry.artifacts.empty()) {
+    error = "separation cache entry metadata is incomplete";
+    return false;
+  }
+
   const auto directory = entry_directory(entry.key);
   for (const auto& artifact : entry.artifacts) {
     if (!safe_relative_path(artifact.relative_path)) {
       error = "separation cache artifact path must stay inside its cache entry";
+      return false;
+    }
+    if (artifact.confidence < 0.0 || artifact.confidence > 1.0) {
+      error = "separation cache artifact confidence is outside [0, 1]";
       return false;
     }
     std::error_code exists_error;
@@ -413,6 +449,9 @@ std::optional<SeparationCacheEntry> SeparationCache::load_complete(
   entry.key = key;
   bool schema_ok = false;
   bool key_ok = false;
+  bool sample_rate_ok = false;
+  bool frames_ok = false;
+  bool confidence_ok = false;
   std::istringstream lines(*manifest);
   std::string line;
   while (std::getline(lines, line)) {
@@ -425,15 +464,40 @@ std::optional<SeparationCacheEntry> SeparationCache::load_complete(
       key_ok = decoded && *decoded == canonical_cache_key(key);
       continue;
     }
+    if (line.rfind("sample_rate=", 0U) == 0U) {
+      const auto parsed = parse_int64(line.substr(12U));
+      if (parsed && *parsed > 0) {
+        entry.sample_rate = static_cast<int>(*parsed);
+        sample_rate_ok = true;
+      }
+      continue;
+    }
+    if (line.rfind("frames=", 0U) == 0U) {
+      const auto parsed = parse_int64(line.substr(7U));
+      if (parsed && *parsed >= 0) {
+        entry.frames = *parsed;
+        frames_ok = true;
+      }
+      continue;
+    }
+    if (line.rfind("overall_confidence=", 0U) == 0U) {
+      const auto parsed = parse_double(line.substr(19U));
+      if (parsed && *parsed >= 0.0 && *parsed <= 1.0) {
+        entry.overall_confidence = *parsed;
+        confidence_ok = true;
+      }
+      continue;
+    }
     if (line.rfind("artifact=", 0U) != 0U) continue;
     const auto fields = split_tabs(line.substr(9U));
-    if (fields.size() != 3U) {
+    if (fields.size() != 4U) {
       error = "separation cache manifest contains an invalid artifact record";
       return std::nullopt;
     }
     const auto kind = artifact_kind_from_name(fields[0]);
     const auto path_text = hex_decode(fields[2]);
-    if (!kind || !path_text) {
+    const auto confidence = parse_double(fields[3]);
+    if (!kind || !path_text || !confidence || *confidence < 0.0 || *confidence > 1.0) {
       error = "separation cache manifest contains an invalid artifact value";
       return std::nullopt;
     }
@@ -444,11 +508,13 @@ std::optional<SeparationCacheEntry> SeparationCache::load_complete(
     }
     entry.artifacts.push_back({.kind = *kind,
                                .role = stem_role_from_name(fields[1]),
-                               .relative_path = relative_path});
+                               .relative_path = relative_path,
+                               .confidence = *confidence});
   }
 
-  if (!schema_ok || !key_ok) {
-    error = "separation cache manifest does not match the requested cache key";
+  if (!schema_ok || !key_ok || !sample_rate_ok || !frames_ok || !confidence_ok ||
+      entry.artifacts.empty()) {
+    error = "separation cache manifest is incomplete or does not match the requested cache key";
     return std::nullopt;
   }
 

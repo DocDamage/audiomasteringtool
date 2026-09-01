@@ -127,6 +127,7 @@ struct SeparationPolicyConfig {
   double minimum_guidance_confidence{0.55};
   double minimum_guided_stereo_sufficiency{0.45};
   double minimum_reconstruction_model_confidence{0.80};
+  double minimum_artifact_assessment_confidence{0.55};
   double maximum_reconstruction_artifact_risk{0.25};
   double minimum_reconstruction_net_benefit{0.20};
 };
@@ -159,10 +160,14 @@ struct CachedArtifact {
   CacheArtifactKind kind{CacheArtifactKind::stem_audio};
   StemRole role{StemRole::unknown};
   std::filesystem::path relative_path;
+  double confidence{0.0};
 };
 
 struct SeparationCacheEntry {
   SeparationCacheKey key;
+  int sample_rate{0};
+  std::int64_t frames{0};
+  double overall_confidence{0.0};
   std::vector<CachedArtifact> artifacts;
 };
 

@@ -32,3 +32,14 @@ target_link_libraries(amt_phase3_tests PRIVATE
   amt_analysis
 )
 add_test(NAME phase3_structural_perceptual_analysis COMMAND amt_phase3_tests)
+
+add_executable(amt_phase3_planner_tests phase3_planner_tests.cpp)
+target_link_libraries(amt_phase3_planner_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_codec
+  amt_analysis
+  amt_dsp
+  amt_mastering
+)
+add_test(NAME phase3_analysis_aware_planner COMMAND amt_phase3_planner_tests)

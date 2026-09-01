@@ -9,8 +9,10 @@
 #include "amt/codec/SndFileCodec.h"
 #include "amt/codec/SndFileDynamic.h"
 #include "amt/core/Version.h"
+#include "amt/mastering/Audition.h"
 #include "amt/mastering/OfflineRenderer.h"
 #include "amt/mastering/Planner.h"
+#include "amt/playback/ComparisonTransport.h"
 #include "amt/playback/Transport.h"
 
 namespace {
@@ -23,6 +25,7 @@ void usage() {
             << "  amt_cli analyze <input>\n"
             << "  amt_cli plan <input>\n"
             << "  amt_cli master <input> <output-directory> [--bits 16|24|32|float]\n"
+            << "  amt_cli audition <original> <master-a> <master-b>\n"
             << "  amt_cli export <input> <output> [--sample-rate N] [--bits 16|24|32|float]\n"
             << "  amt_cli compare <first> <second> [--tolerance value]\n"
             << "  amt_cli play <input>\n"
@@ -187,6 +190,67 @@ int main(int argc, char** argv) {
               << "  Original audition gain=" << rendered->audition.original_gain_db << " dB\n"
               << "  Master A audition gain=" << rendered->audition.master_a_gain_db << " dB\n"
               << "  Master B audition gain=" << rendered->audition.master_b_gain_db << " dB\n";
+    return 0;
+  }
+
+  if (command == "audition" && argc == 5) {
+    const auto original = amt::analysis::analyze_file(codecs, argv[2], error);
+    if (!original) {
+      std::cerr << "original analysis failed: " << error << '\n';
+      return 1;
+    }
+    const auto a = amt::analysis::analyze_file(codecs, argv[3], error);
+    if (!a) {
+      std::cerr << "Master A analysis failed: " << error << '\n';
+      return 1;
+    }
+    const auto b = amt::analysis::analyze_file(codecs, argv[4], error);
+    if (!b) {
+      std::cerr << "Master B analysis failed: " << error << '\n';
+      return 1;
+    }
+    const auto match = amt::mastering::make_loudness_match_profile(
+        original->loudness, a->loudness, b->loudness);
+    amt::playback::ComparisonTransport transport(codecs);
+    if (!transport.load(
+            {.path = argv[2], .audition_gain_db = match.original_gain_db},
+            {.path = argv[3], .audition_gain_db = match.master_a_gain_db},
+            {.path = argv[4], .audition_gain_db = match.master_b_gain_db}, error) ||
+        !transport.play(error)) {
+      std::cerr << "audition failed: " << error << '\n';
+      return 1;
+    }
+    std::cout << "Loudness-matched synchronized audition via " << transport.output_backend_name() << '\n'
+              << "Commands: o=Original, a=Master A, b=Master B, p=pause/resume, s <seconds>=seek, q=quit\n";
+    std::string line;
+    while (std::getline(std::cin, line)) {
+      if (line == "q") break;
+      if (line == "o") transport.select(amt::playback::ComparisonSource::original);
+      else if (line == "a") transport.select(amt::playback::ComparisonSource::master_a);
+      else if (line == "b") transport.select(amt::playback::ComparisonSource::master_b);
+      else if (line == "p") {
+        if (transport.state() == amt::playback::TransportState::playing) {
+          if (!transport.pause(error)) std::cerr << error << '\n';
+        } else if (transport.state() == amt::playback::TransportState::paused) {
+          if (!transport.resume(error)) std::cerr << error << '\n';
+        }
+      } else if (line.rfind("s ", 0U) == 0U) {
+        try {
+          const double seconds = std::stod(line.substr(2U));
+          const auto* metadata = transport.metadata();
+          if (metadata != nullptr) {
+            const auto frame = static_cast<std::int64_t>(
+                std::clamp(seconds, 0.0, metadata->frames / static_cast<double>(metadata->sample_rate)) *
+                metadata->sample_rate);
+            if (!transport.seek(frame, error)) std::cerr << error << '\n';
+          }
+        } catch (...) {
+          std::cerr << "invalid seek time\n";
+        }
+      }
+      if (transport.state() == amt::playback::TransportState::finished) break;
+    }
+    transport.stop();
     return 0;
   }
 

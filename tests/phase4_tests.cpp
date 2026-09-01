@@ -1,6 +1,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 #include "amt/project/ExportRecipes.h"
@@ -50,6 +51,10 @@ void test_project_round_trip() {
     assert(project.revisions[index].parent_id == project.revisions[index - 1U].id);
   }
 
+  std::set<std::string> revision_ids;
+  for (const auto& revision : project.revisions) revision_ids.insert(revision.id);
+  assert(revision_ids.size() == project.revisions.size());
+
   const auto loaded = store.load(project.project_id, error);
   assert(loaded.has_value());
   assert(loaded->source_path == source);
@@ -62,9 +67,50 @@ void test_project_round_trip() {
   assert(loaded->master_b.path == project.master_b.path);
   assert(loaded->revisions.size() == project.revisions.size());
 
+  const auto found = store.find_by_source(source, error);
+  assert(error.empty());
+  assert(found.has_value());
+  assert(found->project_id == project.project_id);
+
+  const auto duplicate_create = store.create(source.lexically_normal(), error);
+  assert(error.empty());
+  assert(duplicate_create.project_id == project.project_id);
   const auto recent = store.list_recent(10U, error);
   assert(recent.size() == 1U);
   assert(recent.front().project_id == project.project_id);
+
+  project.analysis_json.clear();
+  project.master_a_graph_json.clear();
+  project.master_b_graph_json.clear();
+  assert(store.save(project, error));
+  const auto cleared = store.load(project.project_id, error);
+  assert(cleared.has_value());
+  assert(cleared->analysis_json.empty());
+  assert(cleared->master_a_graph_json.empty());
+  assert(cleared->master_b_graph_json.empty());
+
+  std::filesystem::remove_all(root, ignored);
+}
+
+void test_revision_id_uniqueness() {
+  const auto root = std::filesystem::temp_directory_path() / "amt-phase4-revision-id-tests";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+
+  amt::project::ProjectStore store(root);
+  std::string error;
+  auto project = store.create(root / "rapid.wav", error);
+  assert(!project.project_id.empty());
+
+  for (int index = 0; index < 16; ++index) {
+    assert(store.append_revision(project, "test", "Rapid revision.", {}, error));
+  }
+  std::set<std::string> ids;
+  for (const auto& revision : project.revisions) ids.insert(revision.id);
+  assert(ids.size() == project.revisions.size());
+  for (std::size_t index = 1U; index < project.revisions.size(); ++index) {
+    assert(project.revisions[index].parent_id == project.revisions[index - 1U].id);
+  }
 
   std::filesystem::remove_all(root, ignored);
 }
@@ -103,6 +149,7 @@ void test_export_recipes() {
 
 int main() {
   test_project_round_trip();
+  test_revision_id_uniqueness();
   test_export_recipes();
   return 0;
 }

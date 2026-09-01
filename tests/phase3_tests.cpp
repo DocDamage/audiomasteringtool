@@ -31,7 +31,9 @@ float program_sample(const std::int64_t frame, const std::size_t channel) {
   if (second_half) {
     value += 0.14 * std::sin(2.0 * std::numbers::pi * 3500.0 * time);
   }
-  const std::int64_t beat_period = kRate / 2;
+  // Keep the synthetic beat aligned to the analyzer's 1024-sample feature grid so
+  // this test measures tempo detection rather than half-time aliasing from frame drift.
+  const std::int64_t beat_period = 23LL * 1024LL;
   const std::int64_t beat_phase = frame % beat_period;
   if (beat_phase < 64) {
     value += 0.72 * (1.0 - static_cast<double>(beat_phase) / 64.0);

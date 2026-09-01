@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "amt/core/JobControl.h"
+
 namespace amt::worker {
 
 struct OnnxSeparationWorkerRequest {
@@ -36,6 +38,7 @@ struct OnnxSeparationWorkerResult {
 // The worker runs bounded overlapping chunks and streams float WAV stem outputs.
 [[nodiscard]] std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
     const OnnxSeparationWorkerRequest& request,
-    std::string& error);
+    std::string& error,
+    const amt::core::ProgressCallback& progress = {});
 
 }  // namespace amt::worker

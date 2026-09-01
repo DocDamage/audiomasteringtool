@@ -1,12 +1,21 @@
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <string>
 
 #include "amt/project/ExportRecipes.h"
 #include "amt/project/ProjectStore.h"
 
 namespace {
+
+std::string read_text_file(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  std::ostringstream output;
+  output << input.rdbuf();
+  return output.str();
+}
 
 void test_project_round_trip() {
   const auto root = std::filesystem::temp_directory_path() / "amt-phase4-project-tests";
@@ -54,6 +63,26 @@ void test_project_round_trip() {
   for (const auto& revision : project.revisions) revision_ids.insert(revision.id);
   assert(revision_ids.size() == project.revisions.size());
 
+  const auto project_directory = root / project.project_id;
+  for (const auto& revision : project.revisions) {
+    const auto metadata = project_directory / "revisions" / revision.id / "revision.amt";
+    assert(std::filesystem::exists(metadata));
+    assert(read_text_file(metadata).find("engine_version=") != std::string::npos);
+  }
+
+  const auto analysis_directory = project_directory / "revisions" / project.revisions[1U].id;
+  const auto mastering_directory = project_directory / "revisions" / project.revisions[2U].id;
+  const auto immutable_analysis = analysis_directory / "analysis-v2.json";
+  const auto immutable_master_a_graph = mastering_directory / "master-a-graph.json";
+  const auto immutable_master_b_graph = mastering_directory / "master-b-graph.json";
+  const auto immutable_candidates = mastering_directory / "candidates.amt";
+  assert(read_text_file(immutable_analysis) == project.analysis_json);
+  assert(read_text_file(immutable_master_a_graph) == project.master_a_graph_json);
+  assert(read_text_file(immutable_master_b_graph) == project.master_b_graph_json);
+  const auto candidate_snapshot = read_text_file(immutable_candidates);
+  assert(candidate_snapshot.find("master_a_available=1") != std::string::npos);
+  assert(candidate_snapshot.find("master_b_available=1") != std::string::npos);
+
   const auto loaded = store.load(project.project_id, error);
   assert(loaded.has_value());
   assert(loaded->source_path == source);
@@ -87,6 +116,11 @@ void test_project_round_trip() {
   assert(cleared->analysis_json.empty());
   assert(cleared->master_a_graph_json.empty());
   assert(cleared->master_b_graph_json.empty());
+  assert(read_text_file(immutable_analysis) == R"({"schema_version":2,"test":"analysis"})");
+  assert(read_text_file(immutable_master_a_graph) ==
+         R"({"schema_version":1,"nodes":[{"id":"a"}]})");
+  assert(read_text_file(immutable_master_b_graph) ==
+         R"({"schema_version":1,"nodes":[{"id":"b"}]})");
 
   std::filesystem::remove_all(root, ignored);
 }
@@ -124,6 +158,8 @@ void test_selection_history_and_stale_snapshot_merge() {
   assert(selected->revisions.back().parent_id ==
          selected->revisions[selected->revisions.size() - 2U].id);
   assert(selected->revisions.back().output_path == project.master_a.path);
+  assert(std::filesystem::exists(root / project.project_id / "revisions" /
+                                 selected->revisions.back().id / "revision.amt"));
 
   // Simulate the desktop holding the pre-selection revision vector after save().
   // append_revision() must merge the persisted selection node instead of overwriting it.

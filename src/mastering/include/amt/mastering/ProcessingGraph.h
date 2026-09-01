@@ -15,6 +15,8 @@ class ProcessingGraph {
   void add(amt::dsp::ProcessorSpec spec);
   [[nodiscard]] const std::vector<amt::dsp::ProcessorSpec>& nodes() const noexcept { return nodes_; }
   [[nodiscard]] bool empty() const noexcept { return nodes_.empty(); }
+  [[nodiscard]] bool contains(const std::string& id) const noexcept;
+  bool set_bypass(const std::string& id, bool bypass) noexcept;
   [[nodiscard]] bool validate(std::string& error) const;
   [[nodiscard]] std::string to_json() const;
 

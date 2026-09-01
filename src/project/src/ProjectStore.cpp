@@ -130,6 +130,47 @@ std::string make_id(const std::filesystem::path& source) {
   return stream.str();
 }
 
+bool revisions_are_prefix(const std::vector<RevisionNode>& prefix,
+                          const std::vector<RevisionNode>& history) {
+  if (prefix.size() > history.size()) return false;
+  for (std::size_t index = 0U; index < prefix.size(); ++index) {
+    if (prefix[index].id != history[index].id) return false;
+  }
+  return true;
+}
+
+std::filesystem::path selected_output_path(const ProjectRecord& project) {
+  switch (project.selected) {
+    case CandidateSelection::master_a:
+      return project.master_a.available ? project.master_a.path : std::filesystem::path{};
+    case CandidateSelection::master_b:
+      return project.master_b.available ? project.master_b.path : std::filesystem::path{};
+    case CandidateSelection::original:
+      return project.source_path;
+  }
+  return project.source_path;
+}
+
+std::string selection_summary(const CandidateSelection selection) {
+  switch (selection) {
+    case CandidateSelection::master_a: return "Master A selected for audition/export.";
+    case CandidateSelection::master_b: return "Master B selected for audition/export.";
+    case CandidateSelection::original: return "Original selected for audition/export.";
+  }
+  return "Original selected for audition/export.";
+}
+
+void append_selection_revision(ProjectRecord& project) {
+  project.updated_ms = now_ms();
+  const std::string parent = project.revisions.empty() ? std::string{} : project.revisions.back().id;
+  project.revisions.push_back({.id = make_id(project.source_path),
+                               .parent_id = parent,
+                               .timestamp_ms = project.updated_ms,
+                               .kind = "selection",
+                               .summary = selection_summary(project.selected),
+                               .output_path = selected_output_path(project)});
+}
+
 bool write_atomic(const std::filesystem::path& path, const std::string& content,
                   std::string& error) {
   std::error_code ec;
@@ -323,27 +364,62 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
     return false;
   }
   const auto directory = root_ / project.project_id;
+  const auto manifest_path = directory / "manifest.amt";
+  ProjectRecord persisted = project;
 
-  if (!project.analysis_json.empty()) {
-    if (!write_atomic(directory / "analysis-v2.json", project.analysis_json, error)) return false;
+  std::error_code exists_error;
+  const bool manifest_exists = std::filesystem::exists(manifest_path, exists_error);
+  if (exists_error) {
+    error = "unable to inspect existing project manifest: " + exists_error.message();
+    return false;
+  }
+  if (manifest_exists) {
+    std::string load_error;
+    const auto existing = load(project.project_id, load_error);
+    if (!existing) {
+      error = "unable to safely update existing project: " + load_error;
+      return false;
+    }
+
+    const bool disk_is_prefix = revisions_are_prefix(existing->revisions, project.revisions);
+    const bool caller_is_prefix = revisions_are_prefix(project.revisions, existing->revisions);
+    if (!disk_is_prefix && !caller_is_prefix) {
+      error = "project history conflict; reload the project before saving";
+      return false;
+    }
+
+    const bool caller_added_revision =
+        disk_is_prefix && project.revisions.size() > existing->revisions.size();
+    if (caller_is_prefix && existing->revisions.size() > project.revisions.size()) {
+      persisted.revisions = existing->revisions;
+      persisted.updated_ms = std::max(persisted.updated_ms, existing->updated_ms);
+    }
+
+    if (existing->selected != project.selected && !caller_added_revision) {
+      append_selection_revision(persisted);
+    }
+  }
+
+  if (!persisted.analysis_json.empty()) {
+    if (!write_atomic(directory / "analysis-v2.json", persisted.analysis_json, error)) return false;
   } else if (!remove_stale_sidecar(directory / "analysis-v2.json", error)) {
     return false;
   }
 
-  if (!project.master_a_graph_json.empty()) {
-    if (!write_atomic(directory / "master-a-graph.json", project.master_a_graph_json, error)) return false;
+  if (!persisted.master_a_graph_json.empty()) {
+    if (!write_atomic(directory / "master-a-graph.json", persisted.master_a_graph_json, error)) return false;
   } else if (!remove_stale_sidecar(directory / "master-a-graph.json", error)) {
     return false;
   }
 
-  if (!project.master_b_graph_json.empty()) {
-    if (!write_atomic(directory / "master-b-graph.json", project.master_b_graph_json, error)) return false;
+  if (!persisted.master_b_graph_json.empty()) {
+    if (!write_atomic(directory / "master-b-graph.json", persisted.master_b_graph_json, error)) return false;
   } else if (!remove_stale_sidecar(directory / "master-b-graph.json", error)) {
     return false;
   }
 
-  if (!write_atomic(directory / "revisions.amtlog", revisions_text(project), error)) return false;
-  return write_atomic(directory / "manifest.amt", manifest_text(project), error);
+  if (!write_atomic(directory / "revisions.amtlog", revisions_text(persisted), error)) return false;
+  return write_atomic(manifest_path, manifest_text(persisted), error);
 }
 
 std::optional<ProjectRecord> ProjectStore::load(const std::string& project_id,
@@ -471,6 +547,33 @@ bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
                                    std::string summary, std::filesystem::path output_path,
                                    std::string& error) const {
   error.clear();
+
+  std::string load_error;
+  if (const auto existing = load(project.project_id, load_error)) {
+    const bool disk_is_prefix = revisions_are_prefix(existing->revisions, project.revisions);
+    const bool caller_is_prefix = revisions_are_prefix(project.revisions, existing->revisions);
+    if (!disk_is_prefix && !caller_is_prefix) {
+      error = "project history conflict; reload the project before appending a revision";
+      return false;
+    }
+    if (caller_is_prefix && existing->revisions.size() > project.revisions.size()) {
+      project.revisions = existing->revisions;
+      project.updated_ms = std::max(project.updated_ms, existing->updated_ms);
+    }
+  } else {
+    std::error_code exists_error;
+    const bool manifest_exists = std::filesystem::exists(root_ / project.project_id / "manifest.amt",
+                                                         exists_error);
+    if (exists_error) {
+      error = "unable to inspect existing project manifest: " + exists_error.message();
+      return false;
+    }
+    if (manifest_exists) {
+      error = "unable to safely append to existing project: " + load_error;
+      return false;
+    }
+  }
+
   const auto previous_updated_ms = project.updated_ms;
   const auto previous_revision_count = project.revisions.size();
   const std::string parent = project.revisions.empty() ? std::string{} : project.revisions.back().id;

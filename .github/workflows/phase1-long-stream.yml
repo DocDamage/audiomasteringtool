@@ -1,6 +1,19 @@
 name: Phase 1 Long Stream
 
 on:
+  pull_request:
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/audio/**'
+      - 'src/codec/**'
+      - 'src/analysis/**'
+      - 'src/playback/**'
+      - 'src/app/**'
+      - 'src/cli/**'
+      - 'tests/**'
+      - 'scripts/phase1_long_stream_test.py'
+      - '.github/workflows/phase1-long-stream.yml'
   workflow_dispatch:
   schedule:
     - cron: '23 6 * * 1'

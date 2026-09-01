@@ -8,7 +8,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(AMT_BUILD_TESTS "Build tests" ON)
 option(AMT_BUILD_BENCHMARKS "Build benchmark harness" ON)
-option(AMT_WITH_ONNX "Enable production ONNX Runtime integration" OFF)
+option(AMT_WITH_ONNX "Enable production ONNX Runtime integration in the isolated worker" OFF)
+option(AMT_ORT_ENABLE_CUDA "Compile the optional ONNX Runtime CUDA worker execution-provider path" OFF)
+set(ONNXRUNTIME_ROOT "" CACHE PATH "Extracted ONNX Runtime package root used when AMT_WITH_ONNX=ON")
 
 add_subdirectory(src/core)
 add_subdirectory(src/audio)

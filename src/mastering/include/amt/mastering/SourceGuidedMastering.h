@@ -23,6 +23,7 @@ struct SourceGuidedMasteringConfig {
 
 struct SourceGuidedMasteringRenderPair {
   MasteringRenderPair masters;
+  MasteringPlan effective_plan;
   bool source_guidance_applied{false};
   amt::separation::SeparationMode requested_mode{
       amt::separation::SeparationMode::stereo_mastering};

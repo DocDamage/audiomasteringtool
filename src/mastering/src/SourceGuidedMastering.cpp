@@ -46,6 +46,7 @@ struct ScopedWorkDirectory {
 
 struct GuidedAttemptResult {
   MasteringRenderPair masters;
+  MasteringPlan effective_plan;
   std::size_t applied_bindings{0U};
 };
 
@@ -109,6 +110,7 @@ void append_warnings(std::vector<std::string>& destination,
   error.clear();
   return SourceGuidedMasteringRenderPair{
       .masters = *rendered,
+      .effective_plan = plan,
       .source_guidance_applied = false,
       .requested_mode = requested_mode,
       .rendered_mode = amt::separation::SeparationMode::stereo_mastering,
@@ -208,8 +210,10 @@ void append_warnings(std::vector<std::string>& destination,
       });
   if (!mastered) return std::nullopt;
 
-  return GuidedAttemptResult{.masters = *mastered,
-                             .applied_bindings = guided_render->applied_bindings};
+  return GuidedAttemptResult{
+      .masters = *mastered,
+      .effective_plan = guided_plan,
+      .applied_bindings = guided_render->applied_bindings};
 }
 
 }  // namespace
@@ -259,6 +263,7 @@ render_mastering_plan_with_source_guidance(
     error.clear();
     return SourceGuidedMasteringRenderPair{
         .masters = guided->masters,
+        .effective_plan = guided->effective_plan,
         .source_guidance_applied = true,
         .requested_mode = requested_mode,
         .rendered_mode = amt::separation::SeparationMode::source_guided_stereo,

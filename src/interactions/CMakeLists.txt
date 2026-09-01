@@ -1,5 +1,10 @@
-add_library(amt_interactions STATIC src/InteractionEngine.cpp)
+add_library(amt_interactions STATIC
+  src/InteractionEngine.cpp
+  src/KickTracker.cpp
+  src/BassTracker.cpp
+  src/MaskingAnalyzer.cpp
+)
 target_include_directories(amt_interactions PUBLIC include)
-target_link_libraries(amt_interactions PUBLIC amt_core amt_instruments)
+target_link_libraries(amt_interactions PUBLIC amt_core amt_audio amt_instruments)
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(amt_interactions)

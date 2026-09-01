@@ -1,6 +1,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <string>
 
@@ -8,6 +9,7 @@
 #include "amt/separation/SourceGuidance.h"
 
 namespace {
+
 
 std::filesystem::path write_file(const std::filesystem::path& path, const std::string& content) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -171,3 +173,6 @@ int main() {
   test_same_path_replacement_gets_new_cache_identity();
   return 0;
 }
+
+
+

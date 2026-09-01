@@ -187,6 +187,53 @@ target_link_libraries(amt_phase5_effective_plan_provenance_tests PRIVATE
 add_test(NAME phase5_effective_mastering_plan_provenance
   COMMAND amt_phase5_effective_plan_provenance_tests)
 
+add_executable(amt_phase6_characteristics_tests phase6_characteristics_tests.cpp)
+target_link_libraries(amt_phase6_characteristics_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_instruments
+)
+add_test(NAME phase6_instrument_characteristics COMMAND amt_phase6_characteristics_tests)
+
+add_executable(amt_phase7_interaction_engine_tests phase7_interaction_engine_tests.cpp)
+target_link_libraries(amt_phase7_interaction_engine_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_instruments
+  amt_interactions
+)
+add_test(NAME phase7_interaction_engine_and_trackers COMMAND amt_phase7_interaction_engine_tests)
+
+add_executable(amt_phase8_repair_tests phase8_repair_tests.cpp)
+target_link_libraries(amt_phase8_repair_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_repair
+)
+add_test(NAME phase8_restoration_and_repair COMMAND amt_phase8_repair_tests)
+
+add_executable(amt_phase9_decision_tests phase9_decision_tests.cpp)
+target_link_libraries(amt_phase9_decision_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_analysis
+  amt_mastering
+  amt_instruments
+  amt_interactions
+  amt_decision
+)
+add_test(NAME phase9_decision_engine_v2 COMMAND amt_phase9_decision_tests)
+
+add_executable(amt_phase10_reference_tests phase10_reference_tests.cpp)
+target_link_libraries(amt_phase10_reference_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_mastering
+  amt_project
+  amt_reference
+)
+add_test(NAME phase10_reference_mastering_and_my_sound COMMAND amt_phase10_reference_tests)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(

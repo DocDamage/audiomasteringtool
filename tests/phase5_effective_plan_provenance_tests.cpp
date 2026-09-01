@@ -1,8 +1,9 @@
-#define main phase5_existing_source_guided_mastering_main
-#include "phase5_source_guided_mastering_tests.cpp"
-#undef main
+#include "phase5_test_helpers.h"
 
 namespace {
+
+using namespace amt::test;
+
 
 void assert_candidate_plan_equal(
     const amt::mastering::MasteringCandidatePlan& actual,

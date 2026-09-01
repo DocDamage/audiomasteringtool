@@ -62,13 +62,14 @@ class Sha256 final {
     buffer_[buffer_size_++] = 0x80U;
 
     if (buffer_size_ > 56U) {
-      std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(), 0U);
+      std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_), buffer_.end(),
+                std::uint8_t{0U});
       transform(buffer_.data());
       buffer_size_ = 0U;
     }
 
     std::fill(buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_size_),
-              buffer_.begin() + 56, 0U);
+              buffer_.begin() + 56, std::uint8_t{0U});
     for (std::size_t index = 0U; index < 8U; ++index) {
       buffer_[63U - index] = static_cast<std::uint8_t>(bit_length >> (index * 8U));
     }
@@ -181,7 +182,7 @@ std::optional<FileFingerprint> fingerprint_file_sha256(
   }
 
   Sha256 sha256;
-  std::array<char, kReadBufferBytes> buffer{};
+  std::vector<char> buffer(kReadBufferBytes);
   std::uintmax_t processed = 0U;
   while (input) {
     if (cancellation != nullptr && cancellation->is_cancelled()) {

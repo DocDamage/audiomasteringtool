@@ -41,12 +41,29 @@ std::filesystem::path path_from_utf8(const std::string& value) {
 std::filesystem::path normalized_source_path(const std::filesystem::path& path) {
   std::error_code ec;
   auto normalized = std::filesystem::weakly_canonical(path, ec);
-  if (!ec) return normalized.lexically_normal();
+  if (!ec) {
+    normalized = normalized.lexically_normal();
+  } else {
+    ec.clear();
+    normalized = std::filesystem::absolute(path, ec);
+    if (!ec) {
+      normalized = normalized.lexically_normal();
+    } else {
+      normalized = path.lexically_normal();
+    }
+  }
 
-  ec.clear();
-  normalized = std::filesystem::absolute(path, ec);
-  if (!ec) return normalized.lexically_normal();
-  return path.lexically_normal();
+#ifdef _WIN32
+  const auto& str = normalized.native();
+  if (str.size() >= 4U && str[0] == L'\\' && str[1] == L'\\' && str[2] == L'?' && str[3] == L'\\') {
+    if (str.size() >= 8U && (str[4] == L'U' || str[4] == L'u') && (str[5] == L'N' || str[5] == L'n') &&
+        (str[6] == L'C' || str[6] == L'c') && str[7] == L'\\') {
+      return std::filesystem::path(L"\\\\" + str.substr(8U));
+    }
+    return std::filesystem::path(str.substr(4U));
+  }
+#endif
+  return normalized;
 }
 
 bool source_paths_match(const std::filesystem::path& first,
@@ -872,8 +889,14 @@ bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
 
 std::filesystem::path default_project_root() {
 #ifdef _WIN32
-  if (const wchar_t* local = _wgetenv(L"LOCALAPPDATA"); local != nullptr && local[0] != L'\0') {
-    return std::filesystem::path(local) / L"AudioMasteringTool" / L"Projects";
+  wchar_t* local = nullptr;
+  std::size_t local_len = 0U;
+  if (_wdupenv_s(&local, &local_len, L"LOCALAPPDATA") == 0 && local != nullptr) {
+    std::filesystem::path path(local);
+    std::free(local);
+    if (local_len > 1U) {
+      return path / L"AudioMasteringTool" / L"Projects";
+    }
   }
 #else
   if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && xdg[0] != '\0') {

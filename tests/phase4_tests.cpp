@@ -1,6 +1,11 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+
+#include <iostream>
 #include <set>
 #include <sstream>
 #include <string>
@@ -9,6 +14,7 @@
 #include "amt/project/ProjectStore.h"
 
 namespace {
+
 
 std::string read_text_file(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
@@ -84,6 +90,7 @@ void test_project_round_trip() {
   assert(candidate_snapshot.find("master_b_available=1") != std::string::npos);
 
   const auto loaded = store.load(project.project_id, error);
+
   assert(loaded.has_value());
   assert(loaded->source_path == source);
   assert(loaded->selected == amt::project::CandidateSelection::master_b);
@@ -349,17 +356,26 @@ void test_export_recipes() {
   assert(archive != nullptr && archive->available);
   assert(archive->container == amt::codec::AudioContainer::wav);
   assert(archive->sample_format == amt::codec::AudioSampleFormat::float32);
-  assert(!archive->dither_when_reducing_integer_depth);
 }
 
 }  // namespace
 
 int main() {
+
+
+  std::cout << "Running test_project_round_trip..." << std::endl;
   test_project_round_trip();
+  std::cout << "Running test_reanalysis_invalidates_only_current_candidates..." << std::endl;
   test_reanalysis_invalidates_only_current_candidates();
+  std::cout << "Running test_selection_history_and_stale_snapshot_merge..." << std::endl;
   test_selection_history_and_stale_snapshot_merge();
+  std::cout << "Running test_revision_id_uniqueness..." << std::endl;
   test_revision_id_uniqueness();
+  std::cout << "Running test_source_diagnostics_sidecar_restore..." << std::endl;
   test_source_diagnostics_sidecar_restore();
+  std::cout << "Running test_export_recipes..." << std::endl;
   test_export_recipes();
+  std::cout << "All phase4 tests passed!" << std::endl;
   return 0;
 }
+

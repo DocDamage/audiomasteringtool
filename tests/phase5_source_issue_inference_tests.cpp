@@ -1,10 +1,9 @@
-#define main phase5_source_guided_mastering_fixture_main
-#include "phase5_source_guided_mastering_tests.cpp"
-#undef main
-
-#include "amt/separation/SourceIssueInference.h"
+#include "phase5_test_helpers.h"
 
 namespace {
+
+using namespace amt::test;
+
 
 amt::audio::AudioBuffer make_kick_drum_stem(const std::size_t frames,
                                              const int sample_rate = 48000) {

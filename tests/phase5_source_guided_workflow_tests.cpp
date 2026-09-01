@@ -1,10 +1,10 @@
-#define main phase5_source_issue_fixture_main
-#include "phase5_source_issue_inference_tests.cpp"
-#undef main
-
+#include "phase5_test_helpers.h"
 #include "amt/separation/SourceGuidedWorkflow.h"
 
 namespace {
+
+using namespace amt::test;
+
 
 class MemoryWorkflowProvider final : public amt::separation::ISeparationProvider {
  public:

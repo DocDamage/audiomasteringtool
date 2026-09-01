@@ -1,6 +1,24 @@
-add_executable(audiomasteringtool WIN32 Phase5Main.cpp)
-target_link_libraries(audiomasteringtool PRIVATE amt_core)
+add_library(amt_app STATIC
+  src/DesktopApplication.cpp
+  src/MasteringSessionController.cpp
+)
+target_include_directories(amt_app PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(amt_app PUBLIC
+  amt_core
+  amt_codec
+  amt_analysis
+  amt_mastering
+  amt_playback
+  amt_project
+)
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
+amt_enable_warnings(amt_app)
+
+add_executable(audiomasteringtool WIN32 Phase5Main.cpp)
+target_link_libraries(audiomasteringtool PRIVATE amt_core amt_app)
 amt_enable_warnings(audiomasteringtool)
 
 if(WIN32)

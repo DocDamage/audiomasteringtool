@@ -216,7 +216,7 @@ bool read_window(amt::codec::IAudioDecoder& decoder,
 
 #ifdef AMT_WITH_ONNX
 
-void configure_execution_provider(Ort::SessionOptions& options,
+void configure_execution_provider([[maybe_unused]] Ort::SessionOptions& options,
                                   const std::string& provider) {
   if (provider == "cpu") return;
 #ifdef AMT_ORT_ENABLE_CUDA

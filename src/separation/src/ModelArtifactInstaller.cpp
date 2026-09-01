@@ -36,7 +36,7 @@ constexpr TrustedModelArtifact kTrustedModels[] = {
     {.model_name = "htdemucs-onnx-fp16weights",
      .model_version = "d54ed9eb60e258ea82131c6ee14578628816456a",
      .sha256 = "d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a",
-     .size_bytes = 173546540U,
+     .size_bytes = 165612636U,
      .url = "https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/d54ed9eb60e258ea82131c6ee14578628816456a/htdemucs_fp16weights.onnx?download=true"},
 };
 
@@ -390,7 +390,14 @@ std::optional<ModelArtifactInstallResult> ensure_model_artifact_installed(
     return std::nullopt;
   }
 
-  if (std::filesystem::exists(config.model_artifact)) {
+  std::error_code existing_error;
+  const bool existing = std::filesystem::exists(config.model_artifact, existing_error);
+  if (existing_error) {
+    error = "unable to inspect invalid installed model artifact: " +
+            existing_error.message();
+    return std::nullopt;
+  }
+  if (existing) {
     std::error_code remove_error;
     std::filesystem::remove(config.model_artifact, remove_error);
     if (remove_error) {

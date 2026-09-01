@@ -178,3 +178,14 @@ target_link_libraries(amt_phase5_effective_plan_provenance_tests PRIVATE
 )
 add_test(NAME phase5_effective_mastering_plan_provenance
   COMMAND amt_phase5_effective_plan_provenance_tests)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME phase5_calibration_tooling
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/phase5_calibration_tooling_tests.py")
+  set_tests_properties(phase5_calibration_tooling PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+else()
+  message(WARNING "Python 3 not found; Phase 5 calibration tooling tests will be skipped")
+endif()

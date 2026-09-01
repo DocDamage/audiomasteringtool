@@ -24,7 +24,7 @@ jobs:
         run: cmake --build --preset windows-debug
       - name: Build Release
         run: cmake --build --preset windows-release
-      - name: Unit tests
+      - name: Unit and conformance tests
         run: ctest --preset windows-debug
       - name: Worker health
         run: build/windows-msvc/src/worker/Debug/amt_worker.exe --health
@@ -46,22 +46,51 @@ jobs:
           $dll.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Codec status
         run: build/windows-msvc/src/cli/Debug/amt_cli.exe codec-status
-      - name: Generate synthetic fixtures
+      - name: Generate Phase 0 fixtures
         run: python scripts/generate_phase0_fixtures.py build/phase0-fixtures
-      - name: WAV lossless round trip
+      - name: Phase 0 WAV lossless round trip
         shell: pwsh
         run: |
           $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
           & $cli probe build/phase0-fixtures/sine_pcm16.wav
           & $cli rerender build/phase0-fixtures/sine_pcm16.wav "$env:RUNNER_TEMP/amt-roundtrip.wav"
           & $cli verify build/phase0-fixtures/sine_pcm16.wav "$env:RUNNER_TEMP/amt-roundtrip.wav"
-      - name: FLAC lossless round trip
+      - name: Phase 0 FLAC lossless round trip
         shell: pwsh
         run: |
           $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
           & $cli probe build/phase0-fixtures/sine_pcm16.flac
           & $cli rerender build/phase0-fixtures/sine_pcm16.flac "$env:RUNNER_TEMP/amt-roundtrip.flac"
           & $cli verify build/phase0-fixtures/sine_pcm16.flac "$env:RUNNER_TEMP/amt-roundtrip.flac"
+      - name: Generate Phase 1 fixtures
+        run: python scripts/generate_phase1_fixtures.py build/phase1-fixtures
+      - name: Phase 1 analysis and transparent format round trips
+        shell: pwsh
+        run: |
+          $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
+          $source = 'build/phase1-fixtures/tone_stereo_pcm24_48000.wav'
+          & $cli analyze $source
+          & $cli export $source "$env:RUNNER_TEMP/amt-phase1.aiff" --bits 24
+          & $cli compare $source "$env:RUNNER_TEMP/amt-phase1.aiff" --tolerance 2e-7
+          & $cli export $source "$env:RUNNER_TEMP/amt-phase1.flac" --bits 24
+          & $cli compare $source "$env:RUNNER_TEMP/amt-phase1.flac" --tolerance 2e-7
+      - name: Phase 1 sample-rate and bit-depth matrix
+        shell: pwsh
+        run: |
+          $cli = 'build/windows-msvc/src/cli/Debug/amt_cli.exe'
+          $source = 'build/phase1-fixtures/tone_stereo_pcm24_48000.wav'
+          foreach ($rate in 44100, 48000, 96000) {
+            $out = Join-Path $env:RUNNER_TEMP "amt-$rate.wav"
+            & $cli export $source $out --sample-rate $rate --bits 24
+            $probe = (& $cli probe $out) -join "`n"
+            if ($probe -notmatch "rate=$rate") { throw "sample-rate conversion failed for $rate" }
+          }
+          $out16 = Join-Path $env:RUNNER_TEMP 'amt-16bit.wav'
+          & $cli export $source $out16 --bits 16
+          $probe16 = (& $cli probe $out16) -join "`n"
+          if ($probe16 -notmatch 'bits=16') { throw '24-to-16 export did not produce 16-bit PCM' }
+      - name: Phase 1 bounded long-stream smoke
+        run: python scripts/phase1_long_stream_test.py build/windows-msvc/src/cli/Release/amt_cli.exe --minutes 2
       - name: Benchmark smoke
         run: build/windows-msvc/src/bench/Release/amt_bench.exe --minutes 1
       - name: Model registry
@@ -89,5 +118,14 @@ jobs:
       - run: build/ninja-debug/src/cli/amt_cli verify build/phase0-fixtures/sine_pcm16.wav /tmp/amt.wav
       - run: build/ninja-debug/src/cli/amt_cli rerender build/phase0-fixtures/sine_pcm16.flac /tmp/amt.flac
       - run: build/ninja-debug/src/cli/amt_cli verify build/phase0-fixtures/sine_pcm16.flac /tmp/amt.flac
+      - run: python scripts/generate_phase1_fixtures.py build/phase1-fixtures
+      - run: build/ninja-debug/src/cli/amt_cli analyze build/phase1-fixtures/tone_stereo_pcm24_48000.wav
+      - run: build/ninja-debug/src/cli/amt_cli export build/phase1-fixtures/tone_stereo_pcm24_48000.wav /tmp/amt-phase1.aiff --bits 24
+      - run: build/ninja-debug/src/cli/amt_cli compare build/phase1-fixtures/tone_stereo_pcm24_48000.wav /tmp/amt-phase1.aiff --tolerance 2e-7
+      - run: build/ninja-debug/src/cli/amt_cli export build/phase1-fixtures/tone_stereo_pcm24_48000.wav /tmp/amt-phase1.flac --bits 24
+      - run: build/ninja-debug/src/cli/amt_cli compare build/phase1-fixtures/tone_stereo_pcm24_48000.wav /tmp/amt-phase1.flac --tolerance 2e-7
+      - run: build/ninja-debug/src/cli/amt_cli export build/phase1-fixtures/tone_stereo_pcm24_48000.wav /tmp/amt-44100.wav --sample-rate 44100 --bits 24
+      - run: build/ninja-debug/src/cli/amt_cli probe /tmp/amt-44100.wav | grep 'rate=44100'
+      - run: python scripts/phase1_long_stream_test.py build/ninja-debug/src/cli/amt_cli --minutes 0.25
       - run: python scripts/validate_model_registry.py
       - run: python scripts/validate_dependencies.py

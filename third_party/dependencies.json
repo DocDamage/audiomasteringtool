@@ -4,13 +4,23 @@
     {
       "name": "libsndfile",
       "version": "1.2.2",
-      "purpose": "Phase 0 runtime-loaded WAV/FLAC streaming proof",
+      "purpose": "Phase 1 production streaming WAV/AIFF/FLAC codec backend; Phase 0 compatibility proof remains available",
       "source": "https://github.com/libsndfile/libsndfile/releases/tag/1.2.2",
-      "integration": "dynamic runtime loading; not linked into default build",
+      "integration": "dynamic runtime loading behind ICodecService; not link-time coupled to the mastering core",
       "license": "LGPL-2.1-or-later",
-      "productionStatus": "phase0-baseline",
+      "productionStatus": "phase1-production-backend",
       "windowsX64Artifact": "libsndfile-1.2.2-win64.zip",
       "windowsX64Sha256": "2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f"
+    },
+    {
+      "name": "libebur128",
+      "version": "1.2.6",
+      "commit": "67b33abe1558160ed76ada1322329b0e9e058b02",
+      "purpose": "Pinned BS.1770-family programme loudness, sample-peak, true-peak and EBU loudness-range implementation used by Phase 1 metering",
+      "source": "https://github.com/jiixyj/libebur128/tree/v1.2.6",
+      "integration": "FetchContent static library used only by amt_analysis; meter outputs are wrapped by AudioMasteringTool domain types",
+      "license": "MIT",
+      "productionStatus": "phase1-production"
     },
     {
       "name": "ONNX Runtime",
@@ -33,16 +43,16 @@
       "commit": "91ad83ae34a81e0833b1a2b0866f54846370ae53",
       "purpose": "Standalone/plugin-host feasibility spike",
       "source": "https://github.com/juce-framework/JUCE/tree/8.0.15",
-      "integration": "optional spike only; never linked by default Phase 0 build",
+      "integration": "optional spike only; never linked by default Phase 1 build",
       "license": "AGPL-3.0-or-later OR commercial JUCE 8 licence",
       "productionStatus": "licensing-gated-candidate"
     },
     {
       "name": "FFmpeg",
       "version": "unselected",
-      "purpose": "Future broad codec support evaluation",
+      "purpose": "Future controlled broad-codec support for MP3/AAC/M4A/OGG/Opus and related formats",
       "source": "https://ffmpeg.org/",
-      "integration": "not bundled or linked in Phase 0",
+      "integration": "not bundled or linked in Phase 1; exact redistribution build must be reviewed before adoption",
       "license": "LGPL-2.1-or-later by default; optional GPL components change obligations",
       "productionStatus": "evaluation-only"
     }

@@ -1,25 +1,38 @@
-# Phase 0 dependency strategy
-
-This document records the selected dependency direction required by the Phase 0 exit criteria.
+# Dependency strategy
 
 ## Core
 
-`amt_core` stays C++20 and dependency-light. UI frameworks, codec APIs, model runtimes, GPU APIs, and cloud SDKs are adapters around the core rather than dependencies of mastering-domain logic.
+`amt_core` stays C++20 and dependency-light. UI frameworks, codec APIs, model runtimes, GPU APIs, cloud SDKs and standards libraries are adapters around the core rather than dependencies of mastering-domain logic.
 
-## Baseline audio I/O
+## Audio I/O
 
-**Selected for Phase 0:** dynamically loaded libsndfile 1.2.2 for the required integer-PCM WAV/FLAC CLI proof.
+**Phase 1 production foundation:** runtime-loaded libsndfile 1.2.2 behind `ICodecService`.
 
-Why:
+The advertised Phase 1 production set is intentionally controlled:
 
-- no compile/link dependency is required for a clean clone to build;
-- its stable C ABI is sufficient for a narrow streaming proof;
-- WAV and FLAC can be decoded/written incrementally;
-- the CLI can verify decoded sample equality after re-rendering.
+- WAV
+- AIFF
+- FLAC
 
-This adapter is deliberately narrow. Phase 1 replaces it with the production codec abstraction.
+The service provides streaming float decode/write, seek/tell, metadata, capability discovery and a replaceable decoder/encoder boundary. Phase 0's integer-PCM WAV/FLAC helper remains only as a regression/bit-exact proof during migration.
 
-**FFmpeg:** evaluated, not bundled in Phase 0. It remains the likely broad-codec fallback for MP3/AAC/M4A/Opus/etc. only after a reviewed build configuration and redistribution process are defined. GPL/nonfree build switches must never be inherited accidentally.
+**FFmpeg:** evaluated but not bundled in Phase 1. It remains the likely broad-codec fallback for MP3/AAC/M4A/OGG/Opus/etc. only after a reviewed build configuration and redistribution process are defined. GPL/nonfree build switches must never be inherited accidentally.
+
+## Metering
+
+**Selected:** libebur128 1.2.6 pinned to commit `67b33abe1558160ed76ada1322329b0e9e058b02`.
+
+It is MIT licensed and is built only into `amt_analysis`. The wrapper exposes AudioMasteringTool-owned result types and is conformance-tested with generated EBU Tech 3341 vectors.
+
+The Phase 1 standards claim is intentionally scoped to conventional BS.1770-5 Annex 1 programme audio. Advanced/object-based Annex 3/4 layouts require a separately validated implementation before they can be advertised.
+
+## Resampling
+
+Phase 1 provides a replaceable stateful windowed-sinc implementation with anti-alias regression tests. The interface permits later substitution with a separately licensed/resolved production resampler if listening and benchmark evaluation justify it.
+
+## Playback
+
+The Windows-first standalone foundation uses the native WinMM waveOut API behind `IAudioOutputDevice`; it introduces no third-party runtime dependency. Other OS output adapters are deferred to their platform milestones.
 
 ## Inference
 
@@ -30,13 +43,13 @@ This adapter is deliberately narrow. Phase 1 replaces it with the production cod
 - native WebGPU remains a future cross-vendor path evaluated per model.
 - cloud workers share the same model/job concepts but are not part of the core ABI.
 
-Phase 0 pins the inference spike to ONNX Runtime 1.29.0 and provides reproducible CPU/CUDA spike code. Production integration occurs after model selection.
+Phase 0 pins the inference spike to ONNX Runtime 1.29.0 and provides reproducible CPU/CUDA spike code. Production integration occurs after model selection. CUDA runtime validation still requires a self-hosted Windows + NVIDIA runner.
 
 ## Desktop/plugin host
 
-JUCE 8.0.15 passes the technical feasibility evaluation for a thin standalone/plugin host, but it is **not** pulled into the default build in Phase 0. Its dual AGPL/commercial licensing requires an explicit distribution/licensing decision before adoption in a closed-source public build.
+JUCE 8.0.15 passes the technical feasibility evaluation for a thin standalone/plugin host, but its dual AGPL/commercial licensing requires an explicit distribution/licensing decision before adoption in a closed-source public build.
 
-The native Win32 shell proves that the core is host-independent. If JUCE licensing is acceptable, a later host layer may use JUCE; otherwise iPlug2/direct platform/VST3 wrappers remain viable because mastering logic is isolated.
+The native Win32 shell and Phase 1 native playback prove that the core is host-independent. If JUCE licensing is acceptable, a later host layer may use JUCE; otherwise iPlug2/direct platform/VST3 wrappers remain viable because mastering logic is isolated.
 
 ## IPC
 

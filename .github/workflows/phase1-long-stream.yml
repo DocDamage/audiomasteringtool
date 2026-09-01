@@ -1,0 +1,39 @@
+name: Phase 1 Long Stream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  sixty-minute-production-path:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: cmake --preset windows-msvc
+      - run: cmake --build --preset windows-release
+      - name: Install verified libsndfile runtime
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip'
+          $expected = '2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f'
+          $zip = Join-Path $env:RUNNER_TEMP 'libsndfile.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'libsndfile'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          if ((Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant() -ne $expected) { throw 'libsndfile SHA256 mismatch' }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $dll = Get-ChildItem -Path $dest -Recurse -File -Filter '*sndfile*.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'sndfile DLL not found' }
+          $dll.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: 60-minute Phase 1 probe/analyze/export/compare
+        run: python scripts/phase1_long_stream_test.py build/windows-msvc/src/cli/Release/amt_cli.exe --minutes 60
+      - name: 60-minute compute benchmark
+        run: build/windows-msvc/src/bench/Release/amt_bench.exe --minutes 60

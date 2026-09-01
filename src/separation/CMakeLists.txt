@@ -1,5 +1,6 @@
 add_library(amt_separation STATIC
   src/Separation.cpp
+  src/SourceGuidance.cpp
 )
 
 target_include_directories(amt_separation PUBLIC include)

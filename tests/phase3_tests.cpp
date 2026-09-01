@@ -29,7 +29,9 @@ float program_sample(const std::int64_t frame, const std::size_t channel) {
   const double base_amplitude = second_half ? 0.42 : 0.08;
   double value = base_amplitude * std::sin(2.0 * std::numbers::pi * 220.0 * time);
   if (second_half) {
-    value += 0.14 * std::sin(2.0 * std::numbers::pi * 3500.0 * time);
+    // Deliberately strong upper-mid component: this fixture is intended to exercise
+    // both harshness scoring and persistent upper-mid resonance detection.
+    value += 0.32 * std::sin(2.0 * std::numbers::pi * 3500.0 * time);
   }
   // Keep the synthetic beat aligned to the analyzer's 1024-sample feature grid so
   // this test measures tempo detection rather than half-time aliasing from frame drift.

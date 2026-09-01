@@ -1,8 +1,10 @@
 #include "amt/mastering/DesktopMastering.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,23 +31,27 @@ struct PreparedGuidance {
   bool automatic_mode1_approved{false};
 };
 
-[[nodiscard]] bool cancelled(const amt::core::CancellationToken* cancellation) noexcept {
+[[nodiscard]] bool cancelled(
+    const amt::core::CancellationToken* cancellation) noexcept {
   return cancellation != nullptr && cancellation->is_cancelled();
 }
 
 void append_unique(std::vector<std::string>& destination,
                    const std::vector<std::string>& source) {
   for (const auto& value : source) {
-    if (std::find(destination.begin(), destination.end(), value) == destination.end()) {
+    if (std::find(destination.begin(), destination.end(), value) ==
+        destination.end()) {
       destination.push_back(value);
     }
   }
 }
 
-[[nodiscard]] PreparedGuidance stereo_fallback(std::string reason,
-                                               std::vector<std::string> warnings = {}) {
+[[nodiscard]] PreparedGuidance stereo_fallback(
+    std::string reason,
+    std::vector<std::string> warnings = {}) {
   PreparedGuidance prepared;
-  prepared.guidance.decision.mode = amt::separation::SeparationMode::stereo_mastering;
+  prepared.guidance.decision.mode =
+      amt::separation::SeparationMode::stereo_mastering;
   prepared.guidance.decision.confidence = 1.0;
   prepared.guidance.decision.artifact_risk = 0.0;
   prepared.guidance.decision.reasons.push_back(std::move(reason));
@@ -60,7 +66,28 @@ void append_unique(std::vector<std::string>& destination,
       nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
   if (length == 0U || length >= buffer.size()) return {};
   return std::filesystem::path(
-      std::wstring(buffer.data(), static_cast<std::size_t>(length))).parent_path();
+      std::wstring(buffer.data(), static_cast<std::size_t>(length)))
+      .parent_path();
+#else
+  return {};
+#endif
+}
+
+[[nodiscard]] std::filesystem::path local_app_data_directory() {
+#ifdef _WIN32
+  const DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0U);
+  if (required > 1U) {
+    std::vector<wchar_t> buffer(static_cast<std::size_t>(required), L'\0');
+    const DWORD written = GetEnvironmentVariableW(
+        L"LOCALAPPDATA", buffer.data(), required);
+    if (written > 0U && written < required) {
+      return std::filesystem::path(
+          std::wstring(buffer.data(), static_cast<std::size_t>(written)));
+    }
+  }
+  std::error_code temp_error;
+  const auto temporary = std::filesystem::temp_directory_path(temp_error);
+  return temp_error ? std::filesystem::path{} : temporary;
 #else
   return {};
 #endif
@@ -75,16 +102,85 @@ void append_unique(std::vector<std::string>& destination,
 #endif
 }
 
+[[nodiscard]] bool safe_relative_path(const std::filesystem::path& path) {
+  if (path.empty() || path.is_absolute()) return false;
+  for (const auto& component : path) {
+    if (component == "..") return false;
+  }
+  return true;
+}
+
+[[nodiscard]] std::filesystem::path per_user_model_artifact(
+    const std::filesystem::path& registry_path,
+    const std::filesystem::path& packaged_artifact) {
+  const auto user_data = local_app_data_directory();
+  if (user_data.empty()) return {};
+
+  std::error_code relative_error;
+  const auto relative = std::filesystem::relative(
+      packaged_artifact, registry_path.parent_path(), relative_error);
+  if (relative_error || !safe_relative_path(relative)) return {};
+  return user_data / "AudioMasteringTool" / "models" / relative;
+}
+
 void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   const std::string statement = label + ".";
   auto add = [&](MasteringCandidatePlan& candidate) {
-    if (std::find(candidate.rationale.begin(), candidate.rationale.end(), statement) ==
-        candidate.rationale.end()) {
+    if (std::find(candidate.rationale.begin(), candidate.rationale.end(),
+                  statement) == candidate.rationale.end()) {
       candidate.rationale.push_back(statement);
     }
   };
   add(plan.master_a);
   add(plan.master_b);
+}
+
+[[nodiscard]] std::string diagnostic_statement(
+    const amt::separation::SourceGuidedIssue& issue,
+    const bool source_guidance_applied) {
+  const int confidence_percent = static_cast<int>(std::lround(
+      std::clamp(issue.confidence, 0.0, 1.0) * 100.0));
+  const int severity_percent = static_cast<int>(std::lround(
+      std::clamp(issue.severity, 0.0, 1.0) * 100.0));
+
+  std::ostringstream output;
+  output << (source_guidance_applied ? "Source evidence" : "Source diagnostic")
+         << ": " << amt::separation::stem_role_name(issue.source) << ' '
+         << amt::separation::source_guided_issue_name(issue.type)
+         << " (confidence " << confidence_percent
+         << "%, severity " << severity_percent << "%)";
+  if (!issue.evidence.empty()) output << " — " << issue.evidence;
+  return output.str();
+}
+
+void add_source_diagnostics(
+    MasteringPlan& plan,
+    const std::vector<amt::separation::SourceGuidedIssue>& issues,
+    const bool source_guidance_applied) {
+  if (issues.empty()) return;
+
+  std::vector<const amt::separation::SourceGuidedIssue*> ranked;
+  ranked.reserve(issues.size());
+  for (const auto& issue : issues) ranked.push_back(&issue);
+  std::stable_sort(
+      ranked.begin(), ranked.end(),
+      [](const auto* first, const auto* second) {
+        const double first_score = first->confidence * first->severity;
+        const double second_score = second->confidence * second->severity;
+        return first_score > second_score;
+      });
+
+  constexpr std::size_t kMaximumVisibleDiagnostics = 6U;
+  const std::size_t count =
+      std::min(kMaximumVisibleDiagnostics, ranked.size());
+  for (std::size_t index = 0U; index < count; ++index) {
+    const auto statement =
+        diagnostic_statement(*ranked[index], source_guidance_applied);
+    if (std::find(plan.master_a.rationale.begin(), plan.master_a.rationale.end(),
+                  statement) == plan.master_a.rationale.end()) {
+      plan.master_a.rationale.push_back(statement);
+    }
+  }
 }
 
 [[nodiscard]] std::optional<PreparedGuidance> prepare_guidance(
@@ -125,7 +221,8 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
     return stereo_fallback(
         "source guidance unavailable; the packaged model registry is invalid",
         {"Source guidance unavailable — stereo mastering used",
-         registry_error.empty() ? "model registry could not be loaded" : registry_error});
+         registry_error.empty() ? "model registry could not be loaded"
+                                : registry_error});
   }
   if (!selection->active_separation_model) {
     auto prepared = stereo_fallback(
@@ -136,6 +233,17 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   }
 
   auto provider_config = *selection->active_separation_model;
+  const auto user_model_artifact = per_user_model_artifact(
+      registry_path, provider_config.model_artifact);
+  if (user_model_artifact.empty()) {
+    auto prepared = stereo_fallback(
+        "source guidance unavailable; a writable per-user model location could not be resolved",
+        {"Source guidance unavailable — stereo mastering used"});
+    append_unique(prepared.guidance.warnings, selection->warnings);
+    return prepared;
+  }
+  provider_config.model_artifact = user_model_artifact;
+
   std::string install_error;
   const auto install = amt::separation::ensure_model_artifact_installed(
       provider_config, install_error, cancellation,
@@ -150,7 +258,8 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
     auto prepared = stereo_fallback(
         "source guidance unavailable; the trusted separation model could not be installed or verified",
         {"Source guidance unavailable — stereo mastering used",
-         install_error.empty() ? "trusted model installation was unavailable" : install_error});
+         install_error.empty() ? "trusted model installation was unavailable"
+                               : install_error});
     append_unique(prepared.guidance.warnings, selection->warnings);
     return prepared;
   }
@@ -158,7 +267,8 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   amt::separation::WorkerSeparationProvider provider(provider_config);
   amt::separation::SeparationCache cache(
       output_directory.parent_path() / "separation-cache");
-  amt::separation::SourceGuidanceOrchestrator orchestrator(provider, nullptr, &cache);
+  amt::separation::SourceGuidanceOrchestrator orchestrator(
+      provider, nullptr, &cache);
 
   amt::separation::SourceGuidanceRequest request;
   request.separation.source_path = canonical_input;
@@ -203,11 +313,12 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   if (!prepared.automatic_mode1_approved &&
       prepared.guidance.decision.mode ==
           amt::separation::SeparationMode::source_guided_stereo) {
-    prepared.guidance.decision.mode = amt::separation::SeparationMode::stereo_mastering;
+    prepared.guidance.decision.mode =
+        amt::separation::SeparationMode::stereo_mastering;
     prepared.guidance.decision.reasons.emplace_back(
         "source-estimate diagnostics are available, but automatic source-guided audio changes are not yet approved for this model configuration");
     prepared.guidance.warnings.emplace_back(
-        "Source guidance diagnostics available — stereo mastering used until automatic Mode 1 calibration is approved");
+        "Source guidance diagnostics available — stereo mastering retained until automatic Mode 1 calibration is approved");
   }
 
   append_unique(prepared.guidance.warnings, selection->warnings);
@@ -247,15 +358,22 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
   plan = std::move(result->effective_plan);
   if (result->source_guidance_applied) {
     add_mode_rationale(plan, "Source guidance used");
-  } else if (prepared->analysis_performed && !prepared->automatic_mode1_approved) {
-    add_mode_rationale(plan, "Source guidance unavailable — stereo mastering used");
+  } else if (prepared->analysis_performed &&
+             !prepared->automatic_mode1_approved) {
+    add_mode_rationale(
+        plan,
+        "Source diagnostics completed — canonical stereo mastering retained while automatic source-guided changes remain calibration-gated");
   } else if (!prepared->capability_available ||
-             result->requested_mode != amt::separation::SeparationMode::stereo_mastering) {
-    add_mode_rationale(plan, "Source guidance unavailable — stereo mastering used");
+             result->requested_mode !=
+                 amt::separation::SeparationMode::stereo_mastering) {
+    add_mode_rationale(plan,
+                       "Source guidance unavailable — stereo mastering used");
   } else {
     add_mode_rationale(plan, "Stereo mastering");
   }
 
+  add_source_diagnostics(plan, prepared->issues,
+                         result->source_guidance_applied);
   amt::core::report_progress(progress, 1.0);
   return std::move(result->masters);
 }

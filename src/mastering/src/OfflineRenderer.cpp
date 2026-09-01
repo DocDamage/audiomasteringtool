@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "amt/mastering/ProcessingGraph.h"
 
@@ -14,6 +16,7 @@ namespace amt::mastering {
 namespace {
 
 constexpr std::size_t kRenderFrames = 8192U;
+constexpr std::size_t kMaxRenderNameAttempts = 100000U;
 
 double db_to_linear(const double db) { return std::pow(10.0, db / 20.0); }
 
@@ -24,6 +27,36 @@ std::filesystem::path temp_path_for(const std::filesystem::path& output, const c
 void remove_if_exists(const std::filesystem::path& path) {
   std::error_code ignored;
   std::filesystem::remove(path, ignored);
+}
+
+std::optional<std::pair<std::filesystem::path, std::filesystem::path>>
+allocate_render_paths(const std::filesystem::path& output_directory,
+                      const std::string& stem, std::string& error) {
+  for (std::size_t attempt = 1U; attempt <= kMaxRenderNameAttempts; ++attempt) {
+    const std::string revision_suffix = attempt == 1U
+        ? std::string{}
+        : "_r" + std::to_string(attempt);
+    const auto output_a = output_directory /
+        (stem + "_Master_A" + revision_suffix + ".wav");
+    const auto output_b = output_directory /
+        (stem + "_Master_B" + revision_suffix + ".wav");
+
+    std::error_code exists_error;
+    const bool a_exists = std::filesystem::exists(output_a, exists_error);
+    if (exists_error) {
+      error = "unable to inspect Master A render path: " + exists_error.message();
+      return std::nullopt;
+    }
+    const bool b_exists = std::filesystem::exists(output_b, exists_error);
+    if (exists_error) {
+      error = "unable to inspect Master B render path: " + exists_error.message();
+      return std::nullopt;
+    }
+    if (!a_exists && !b_exists) return std::pair{output_a, output_b};
+  }
+
+  error = "unable to allocate a unique mastering render filename";
+  return std::nullopt;
 }
 
 bool render_graph_to_float(
@@ -211,9 +244,10 @@ std::optional<MasteringRenderPair> render_mastering_plan(
     error = "unable to create mastering output directory";
     return std::nullopt;
   }
-  const std::string stem = input.stem().string();
-  const auto output_a = output_directory / (stem + "_Master_A.wav");
-  const auto output_b = output_directory / (stem + "_Master_B.wav");
+
+  const auto allocated = allocate_render_paths(output_directory, input.stem().string(), error);
+  if (!allocated) return std::nullopt;
+  const auto& [output_a, output_b] = *allocated;
 
   const auto a = render_candidate(codecs, input, output_a, plan.master_a, error, settings,
                                   cancellation, [&](const double value) {
@@ -224,7 +258,10 @@ std::optional<MasteringRenderPair> render_mastering_plan(
                                   cancellation, [&](const double value) {
                                     amt::core::report_progress(progress, 0.5 + value * 0.5);
                                   });
-  if (!b) return std::nullopt;
+  if (!b) {
+    remove_if_exists(a->output_path);
+    return std::nullopt;
+  }
 
   return MasteringRenderPair{.master_a = *a,
                              .master_b = *b,

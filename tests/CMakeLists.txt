@@ -107,3 +107,15 @@ target_link_libraries(amt_phase5_source_guided_renderer_tests PRIVATE
   amt_separation
 )
 add_test(NAME phase5_source_guided_stereo_renderer COMMAND amt_phase5_source_guided_renderer_tests)
+
+add_executable(amt_phase5_source_guided_mastering_tests phase5_source_guided_mastering_tests.cpp)
+target_link_libraries(amt_phase5_source_guided_mastering_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_codec
+  amt_analysis
+  amt_dsp
+  amt_mastering
+  amt_separation
+)
+add_test(NAME phase5_source_guided_mastering_integration COMMAND amt_phase5_source_guided_mastering_tests)

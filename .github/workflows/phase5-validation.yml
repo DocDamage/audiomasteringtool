@@ -47,5 +47,8 @@ jobs:
       - name: Source-guided stereo renderer
         continue-on-error: true
         run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_renderer$' --output-on-failure
+      - name: Source-guided mastering integration
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_mastering_integration$' --output-on-failure
       - name: Enforce aggregate Phase 5 suite
         run: ctest --preset ninja-debug -R '^phase5_' --output-on-failure

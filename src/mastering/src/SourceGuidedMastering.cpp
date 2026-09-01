@@ -121,7 +121,6 @@ void append_warnings(std::vector<std::string>& destination,
     const std::filesystem::path& canonical_input,
     const std::filesystem::path& output_directory,
     const amt::analysis::Phase1AnalysisReport& source_analysis,
-    const MasteringPlan& plan,
     const amt::separation::SourceGuidanceResult& guidance,
     const amt::separation::SeparationDecision& guided_decision,
     const std::vector<amt::separation::SourceGuidedIssue>& issues,
@@ -186,10 +185,26 @@ void append_warnings(std::vector<std::string>& destination,
     return std::nullopt;
   }
 
+  const auto guided_analysis = amt::analysis::analyze_file(
+      codecs, guided_path, error, cancellation, [&](const double value) {
+        amt::core::report_progress(progress, 0.45 + value * 0.10);
+      });
+  if (!guided_analysis) return std::nullopt;
+  if (cancelled(cancellation)) {
+    error = "source-guided mastering cancelled";
+    return std::nullopt;
+  }
+
+  // Mode 1 changes the canonical-stereo-derived program before the normal mastering
+  // graph. Re-plan from that post-guidance signal so the downstream graph does not
+  // repeat corrections that source guidance has already made. The untouched source
+  // analysis is still passed to render_mastering_plan solely for Original A/B
+  // loudness matching.
+  const auto guided_plan = plan_mastering(*guided_analysis);
   const auto mastered = render_mastering_plan(
-      codecs, guided_path, output_directory, source_analysis, plan, error,
+      codecs, guided_path, output_directory, source_analysis, guided_plan, error,
       render_settings, cancellation, [&](const double value) {
-        amt::core::report_progress(progress, 0.45 + value * 0.55);
+        amt::core::report_progress(progress, 0.55 + value * 0.45);
       });
   if (!mastered) return std::nullopt;
 
@@ -237,7 +252,7 @@ render_mastering_plan_with_source_guidance(
   }
 
   const auto guided = attempt_mode1(
-      codecs, canonical_input, output_directory, source_analysis, plan, guidance,
+      codecs, canonical_input, output_directory, source_analysis, guidance,
       guided_decision, issues, warnings, error, config, render_settings,
       cancellation, progress);
   if (guided) {
@@ -266,7 +281,7 @@ render_mastering_plan_with_source_guidance(
   error.clear();
   return render_mode0(codecs, canonical_input, output_directory, source_analysis,
                       plan, requested_mode, std::move(warnings), error,
-                      render_settings, cancellation, progress, 0.45);
+                      render_settings, cancellation, progress, 0.55);
 }
 
 }  // namespace amt::mastering

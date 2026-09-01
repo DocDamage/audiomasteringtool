@@ -20,8 +20,17 @@ constexpr std::size_t kMaxRenderNameAttempts = 100000U;
 
 double db_to_linear(const double db) { return std::pow(10.0, db / 20.0); }
 
-std::filesystem::path temp_path_for(const std::filesystem::path& output, const char* suffix) {
-  return output.parent_path() / (output.stem().string() + suffix + ".wav");
+std::filesystem::path append_ascii(std::filesystem::path value, const std::string& suffix) {
+  value += suffix;
+  return value;
+}
+
+std::filesystem::path temp_path_for(const std::filesystem::path& output,
+                                    const std::string& suffix) {
+  auto filename = output.stem();
+  filename = append_ascii(std::move(filename), suffix);
+  filename = append_ascii(std::move(filename), ".wav");
+  return output.parent_path() / filename;
 }
 
 void remove_if_exists(const std::filesystem::path& path) {
@@ -31,15 +40,20 @@ void remove_if_exists(const std::filesystem::path& path) {
 
 std::optional<std::pair<std::filesystem::path, std::filesystem::path>>
 allocate_render_paths(const std::filesystem::path& output_directory,
-                      const std::string& stem, std::string& error) {
+                      const std::filesystem::path& stem, std::string& error) {
   for (std::size_t attempt = 1U; attempt <= kMaxRenderNameAttempts; ++attempt) {
     const std::string revision_suffix = attempt == 1U
         ? std::string{}
         : "_r" + std::to_string(attempt);
-    const auto output_a = output_directory /
-        (stem + "_Master_A" + revision_suffix + ".wav");
-    const auto output_b = output_directory /
-        (stem + "_Master_B" + revision_suffix + ".wav");
+
+    auto filename_a = append_ascii(stem, "_Master_A");
+    filename_a = append_ascii(std::move(filename_a), revision_suffix);
+    filename_a = append_ascii(std::move(filename_a), ".wav");
+    auto filename_b = append_ascii(stem, "_Master_B");
+    filename_b = append_ascii(std::move(filename_b), revision_suffix);
+    filename_b = append_ascii(std::move(filename_b), ".wav");
+    const auto output_a = output_directory / filename_a;
+    const auto output_b = output_directory / filename_b;
 
     std::error_code exists_error;
     const bool a_exists = std::filesystem::exists(output_a, exists_error);
@@ -184,6 +198,7 @@ std::optional<RenderResult> render_candidate(
                                 })) {
     remove_if_exists(temp_render);
     remove_if_exists(temp_adjusted);
+    remove_if_exists(output);
     return std::nullopt;
   }
 
@@ -191,6 +206,7 @@ std::optional<RenderResult> render_candidate(
   if (!final_analysis) {
     remove_if_exists(temp_render);
     remove_if_exists(temp_adjusted);
+    remove_if_exists(output);
     return std::nullopt;
   }
 
@@ -202,6 +218,7 @@ std::optional<RenderResult> render_candidate(
       remove_if_exists(temp_render);
       remove_if_exists(temp_adjusted);
       remove_if_exists(temp_safety);
+      remove_if_exists(output);
       return std::nullopt;
     }
     final_analysis = amt::analysis::analyze_file(codecs, output, error, cancellation);
@@ -209,6 +226,7 @@ std::optional<RenderResult> render_candidate(
       remove_if_exists(temp_render);
       remove_if_exists(temp_adjusted);
       remove_if_exists(temp_safety);
+      remove_if_exists(output);
       return std::nullopt;
     }
   }
@@ -225,6 +243,7 @@ std::optional<RenderResult> render_candidate(
   result.loudness_error_lu = final_analysis->loudness.integrated_lufs - candidate.target_lufs;
   result.peak_ceiling_met = final_analysis->loudness.true_peak_dbtp <= candidate.ceiling_dbtp + 0.05;
   if (settings.verify_output && !result.peak_ceiling_met) {
+    remove_if_exists(output);
     error = "render exceeded true-peak ceiling after safety correction";
     return std::nullopt;
   }
@@ -245,7 +264,7 @@ std::optional<MasteringRenderPair> render_mastering_plan(
     return std::nullopt;
   }
 
-  const auto allocated = allocate_render_paths(output_directory, input.stem().string(), error);
+  const auto allocated = allocate_render_paths(output_directory, input.stem(), error);
   if (!allocated) return std::nullopt;
   const auto& [output_a, output_b] = *allocated;
 

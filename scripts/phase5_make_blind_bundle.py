@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import random
 import shutil
 import sys
@@ -55,8 +56,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
         ("stereoAuditionGainDb", stereo_gain),
         ("guidedAuditionGainDb", guided_gain),
     ):
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise ValueError(f"manifest field {label} must be numeric: {path}")
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+        ):
+            raise ValueError(f"manifest field {label} must be finite numeric: {path}")
     if stereo_gain > 1.0e-9 or guided_gain > 1.0e-9:
         raise ValueError(f"blind audition gains must be attenuation-only: {path}")
     return data
@@ -116,6 +121,12 @@ def main() -> int:
             # could bias preference toward the louder candidate.
             stereo = safe_audio(manifest["stereoBlindAudition"], "stereoBlindAudition")
             guided = safe_audio(manifest["guidedBlindAudition"], "guidedBlindAudition")
+            if stereo.resolve() == guided.resolve():
+                raise ValueError(f"blind audition candidates must be distinct files: {manifest_path}")
+            if stereo.resolve() == Path(manifest["stereoMasterA"]).resolve():
+                raise ValueError(f"stereoBlindAudition must not reuse raw stereoMasterA: {manifest_path}")
+            if guided.resolve() == Path(manifest["guidedMasterA"]).resolve():
+                raise ValueError(f"guidedBlindAudition must not reuse raw guidedMasterA: {manifest_path}")
             trial_id = stable_trial_id(
                 manifest_path, manifest["source"], manifest["modelName"], manifest["modelVersion"]
             )

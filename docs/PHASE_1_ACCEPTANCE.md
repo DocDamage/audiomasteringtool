@@ -7,14 +7,15 @@ Phase 1 is accepted only when the implementation and automated validation below 
 - [x] Framework-independent planar float32 `AudioBuffer`.
 - [x] Interleaved ↔ planar conversion.
 - [x] Streaming decoder/encoder contracts.
-- [x] Audio metadata and codec capability discovery.
+- [x] Audio metadata, conventional channel-layout metadata, tags, and codec capability discovery.
 - [x] Cooperative cancellation and progress callbacks.
 - [x] Streaming seek/tell support.
-- [x] Controlled WAV/AIFF/FLAC production backend.
+- [x] Controlled WAV/AIFF/FLAC production backend enforced at the backend boundary.
 - [x] Replaceable streaming high-quality windowed-sinc resampler.
 - [x] Multiresolution waveform min/max/RMS peak cache.
 - [x] Transparent export preserving source sample rate/channels by default.
-- [x] TPDF dither only on intentional integer bit-depth reduction.
+- [x] Deterministic TPDF dither when export intentionally quantizes/reduces to integer PCM.
+- [x] No same-depth pass-through dither.
 - [x] Decoded-audio comparison independent of container format.
 
 ## Playback / transport
@@ -24,8 +25,28 @@ Phase 1 is accepted only when the implementation and automated validation below 
 - [x] Bounded queued Windows audio output.
 - [x] Decoder access isolated from the device rendering worker.
 - [x] No model inference on the playback path.
+- [x] Transport logic testable without a physical audio endpoint through a fake output device.
 
 Windows is the Phase 1 native playback target. Portable builds compile the transport contracts but intentionally report native output unsupported until the later platform phases.
+
+Hosted CI does not provide a meaningful physical speaker endpoint, so CI compiles the WinMM output implementation and tests transport semantics through a fake device; real hardware playback remains part of Windows exploratory/manual validation rather than a falsely claimed hosted-CI runtime proof.
+
+## Windows desktop Phase 1 foundation
+
+The Windows application itself is no longer the Phase 0 blank shell.
+
+- [x] Open WAV/AIFF/FLAC source.
+- [x] Probe and display source metadata.
+- [x] Run analysis asynchronously off the UI/audio callback path.
+- [x] Show progress and support cooperative cancellation.
+- [x] Render the multiresolution waveform cache.
+- [x] Display loudness, peak, spectral, stereo/phase, and integrity metrics.
+- [x] Play/pause/resume/stop mono/stereo sources.
+- [x] Seek with a synchronized playhead.
+- [x] Perform transparent WAV/AIFF/FLAC export.
+- [x] Headless `--phase1-self-test` executes the desktop target's analyze → waveform → export → decoded-compare integration in Windows CI.
+
+Conventional multichannel sources can be analyzed/exported; Phase 1 native playback is intentionally mono/stereo.
 
 ## BS.1770-5 / loudness baseline
 
@@ -48,7 +69,7 @@ Conformance tests generated in code:
 
 - EBU Tech 3341 Test 1 — stereo 1 kHz, -23 dBFS peak, 20 s → M/S/I = -23.0 ±0.1 LUFS.
 - EBU Tech 3341 Test 6 — conventional 5.0 channel weighting → I = -23.0 ±0.1 LUFS.
-- Inter-sample true-peak stress — fs/4 sine, 1.41 linear amplitude, 45° phase → approximately +3 dBTP within published true-peak tolerance.
+- Inter-sample true-peak stress — fs/4 sine, 1.41 linear amplitude, 45° phase → approximately +3 dBTP within the published true-peak tolerance.
 
 Passing these tests is a required CI gate; they are not replaced by approximate hand-written loudness formulas.
 
@@ -64,9 +85,9 @@ Passing these tests is a required CI gate; they are not replaced by approximate 
 - [x] Negative-correlation window fraction.
 - [x] NaN/Inf detection.
 - [x] DC offset.
-- [x] clipping/full-scale run detection.
-- [x] head/tail silence.
-- [x] channel imbalance.
+- [x] Clipping/full-scale-run detection.
+- [x] Head/tail silence.
+- [x] Channel imbalance.
 
 Instrument classification, genre models, structural ML and source separation are deliberately not part of Phase 1.
 
@@ -78,13 +99,15 @@ CI must prove:
 2. Portable debug build/test on Linux.
 3. Phase 0 regressions remain green.
 4. Phase 1 unit/conformance tests pass.
-5. Production WAV load/analyze/export works.
-6. 24-bit WAV → AIFF → decoded comparison passes.
-7. 24-bit WAV → FLAC → decoded comparison passes.
-8. Sample-rate conversion matrix covers 44.1/48/96 kHz.
-9. Intentional 24→16 bit-depth export succeeds with dither path.
-10. Long-file streaming regression exercises probe → analyze → export → decoded comparison without loading the entire file into RAM.
-11. Dependency and model registries remain valid.
+5. Windows desktop target executes the Phase 1 analyze/waveform/export integration self-test.
+6. Production WAV load/analyze/export works.
+7. 24-bit WAV → AIFF → decoded comparison passes.
+8. 24-bit WAV → FLAC → decoded comparison passes.
+9. Sample-rate conversion matrix covers 44.1/48/96 kHz.
+10. Intentional 24→16 bit-depth export exercises the dither/quantization path.
+11. Bounded long-file smoke exercises probe → analyze → export → decoded comparison without loading the entire file into RAM.
+12. The dedicated Phase 1 long-stream workflow exercises a 60-minute source on pull requests touching the audio/analysis/app pipeline, on manual dispatch, and on the weekly schedule.
+13. Dependency and model registries remain valid.
 
 ## Explicit non-claims
 
@@ -94,9 +117,11 @@ Phase 1 does not claim:
 - kick/808 intelligence
 - stem/source-aware repair
 - deterministic mastering DSP chains
-- two-master generation/A-B
+- two-master generation/A-B mastering UX
 - immersive/object-based BS.1770 Annex 3/4 coverage
 - macOS/Linux native playback
 - production MP3/AAC/M4A/OGG/Opus codec support
+- hosted-CI runtime validation of a physical Windows playback endpoint
+- CUDA inference runtime validation
 
-Those remain in their scheduled later phases.
+Those remain in their scheduled later phases or require the appropriate hardware validation environment.

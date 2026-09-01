@@ -55,6 +55,8 @@ class ProjectStore {
   bool save(const ProjectRecord& project, std::string& error) const;
   [[nodiscard]] std::optional<ProjectRecord> load(const std::string& project_id,
                                                    std::string& error) const;
+  [[nodiscard]] std::optional<ProjectRecord> find_by_source(
+      const std::filesystem::path& source_path, std::string& error) const;
   [[nodiscard]] std::vector<ProjectRecord> list_recent(std::size_t limit,
                                                        std::string& error) const;
   bool append_revision(ProjectRecord& project, std::string kind, std::string summary,

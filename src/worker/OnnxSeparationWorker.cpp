@@ -5,9 +5,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -38,10 +40,34 @@ struct TemporaryInput {
   std::filesystem::path path;
   bool owned{false};
 
-  ~TemporaryInput() {
+  TemporaryInput() = default;
+  TemporaryInput(std::filesystem::path value, const bool owns)
+      : path(std::move(value)), owned(owns) {}
+
+  TemporaryInput(const TemporaryInput&) = delete;
+  TemporaryInput& operator=(const TemporaryInput&) = delete;
+
+  TemporaryInput(TemporaryInput&& other) noexcept
+      : path(std::move(other.path)), owned(other.owned) {
+    other.owned = false;
+  }
+
+  TemporaryInput& operator=(TemporaryInput&& other) noexcept {
+    if (this == &other) return *this;
+    cleanup();
+    path = std::move(other.path);
+    owned = other.owned;
+    other.owned = false;
+    return *this;
+  }
+
+  ~TemporaryInput() { cleanup(); }
+
+  void cleanup() noexcept {
     if (!owned || path.empty()) return;
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
+    owned = false;
   }
 };
 
@@ -77,6 +103,14 @@ bool validate_request(const OnnxSeparationWorkerRequest& request,
     error = "ONNX separation request contains an unsafe stem name";
     return false;
   }
+  for (std::size_t index = 0U; index < request.stem_names.size(); ++index) {
+    if (std::find(request.stem_names.begin() + static_cast<std::ptrdiff_t>(index + 1U),
+                  request.stem_names.end(), request.stem_names[index]) !=
+        request.stem_names.end()) {
+      error = "ONNX separation stem taxonomy contains a duplicate role name";
+      return false;
+    }
+  }
   if (request.input_tensor_name.empty() || request.output_tensor_name.empty()) {
     error = "ONNX separation tensor names cannot be empty";
     return false;
@@ -108,7 +142,8 @@ std::optional<TemporaryInput> prepare_model_input(
   }
 
   if (source_metadata->sample_rate == request.input_sample_rate) {
-    return TemporaryInput{.path = request.source_path, .owned = false};
+    return std::optional<TemporaryInput>{
+        std::in_place, request.source_path, false};
   }
 
   std::error_code directory_error;
@@ -118,9 +153,7 @@ std::optional<TemporaryInput> prepare_model_input(
     return std::nullopt;
   }
 
-  TemporaryInput input{
-      .path = request.output_directory / ".amt-model-input.wav",
-      .owned = true};
+  TemporaryInput input(request.output_directory / ".amt-model-input.wav", true);
   amt::codec::ExportRequest conversion;
   conversion.sample_rate = request.input_sample_rate;
   conversion.container = amt::codec::AudioContainer::wav;
@@ -130,7 +163,7 @@ std::optional<TemporaryInput> prepare_model_input(
                                 conversion, error)) {
     return std::nullopt;
   }
-  return input;
+  return std::optional<TemporaryInput>{std::move(input)};
 }
 
 bool read_window(amt::codec::IAudioDecoder& decoder,
@@ -252,6 +285,10 @@ bool write_output_span(const float* output,
       const std::size_t source_base = (stem * 2U + channel) * chunk_frames;
       for (std::size_t frame = 0U; frame < output_frames; ++frame) {
         float value = output[source_base + frame];
+        if (!std::isfinite(value)) {
+          error = "separation model produced a non-finite audio sample";
+          return false;
+        }
         if (blend_previous_tail && frame < overlap_frames) {
           const double t = static_cast<double>(frame + 1U) /
                            static_cast<double>(overlap_frames + 1U);
@@ -386,12 +423,7 @@ std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
 
       const bool final_chunk =
           start + static_cast<std::int64_t>(read) >= metadata.frames;
-      std::size_t output_frames = 0U;
-      if (first_chunk) {
-        output_frames = final_chunk ? read : stride;
-      } else {
-        output_frames = final_chunk ? read : stride;
-      }
+      const std::size_t output_frames = final_chunk ? read : stride;
 
       if (!write_output_span(values, stem_count, chunk_frames, output_frames,
                              overlap_frames, !first_chunk && overlap_frames > 0U,

@@ -1,8 +1,10 @@
 #include "amt/project/ProjectStore.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cwctype>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -30,6 +32,43 @@ std::filesystem::path path_from_utf8(const std::string& value) {
   converted.reserve(value.size());
   for (const unsigned char byte : value) converted.push_back(static_cast<char8_t>(byte));
   return std::filesystem::path(converted);
+}
+
+std::filesystem::path normalized_source_path(const std::filesystem::path& path) {
+  std::error_code ec;
+  auto normalized = std::filesystem::weakly_canonical(path, ec);
+  if (!ec) return normalized.lexically_normal();
+
+  ec.clear();
+  normalized = std::filesystem::absolute(path, ec);
+  if (!ec) return normalized.lexically_normal();
+  return path.lexically_normal();
+}
+
+bool source_paths_match(const std::filesystem::path& first,
+                        const std::filesystem::path& second) {
+  std::error_code first_exists_error;
+  const bool first_exists = std::filesystem::exists(first, first_exists_error);
+  std::error_code second_exists_error;
+  const bool second_exists = std::filesystem::exists(second, second_exists_error);
+  if (!first_exists_error && !second_exists_error && first_exists && second_exists) {
+    std::error_code equivalent_error;
+    if (std::filesystem::equivalent(first, second, equivalent_error) && !equivalent_error) return true;
+  }
+
+  const auto normalized_first = normalized_source_path(first);
+  const auto normalized_second = normalized_source_path(second);
+#ifdef _WIN32
+  auto first_native = normalized_first.native();
+  auto second_native = normalized_second.native();
+  std::transform(first_native.begin(), first_native.end(), first_native.begin(),
+                 [](const wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+  std::transform(second_native.begin(), second_native.end(), second_native.begin(),
+                 [](const wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+  return first_native == second_native;
+#else
+  return normalized_first == normalized_second;
+#endif
 }
 
 std::string hex_encode(const std::string_view value) {
@@ -73,13 +112,21 @@ std::filesystem::path decode_path(const std::string& value) {
 }
 
 std::string make_id(const std::filesystem::path& source) {
+  static std::atomic_uint64_t sequence{0U};
   const auto timestamp = now_ms();
+  const auto serial = sequence.fetch_add(1U, std::memory_order_relaxed);
   const auto source_text = path_to_utf8(source);
-  const auto hash = std::hash<std::string>{}(source_text + std::to_string(timestamp));
-  std::mt19937_64 random(static_cast<std::uint64_t>(timestamp) ^ static_cast<std::uint64_t>(hash));
+
+  std::random_device device;
+  const auto entropy = (static_cast<std::uint64_t>(device()) << 32U) ^
+                       static_cast<std::uint64_t>(device());
+  const auto hash = std::hash<std::string>{}(
+      source_text + ':' + std::to_string(timestamp) + ':' + std::to_string(serial));
+  const auto suffix = static_cast<std::uint64_t>(hash) ^ entropy ^ (serial * 0x9E3779B97F4A7C15ULL);
+
   std::ostringstream stream;
-  stream << "amt-" << timestamp << '-' << std::hex << std::setw(12) << std::setfill('0')
-         << (random() & 0xFFFFFFFFFFFFULL);
+  stream << "amt-" << timestamp << '-' << std::hex << std::setw(8) << std::setfill('0')
+         << serial << '-' << std::setw(16) << suffix;
   return stream.str();
 }
 
@@ -142,6 +189,16 @@ bool write_atomic(const std::filesystem::path& path, const std::string& content,
   if (had_existing) {
     ec.clear();
     std::filesystem::remove(backup, ec);
+  }
+  return true;
+}
+
+bool remove_stale_sidecar(const std::filesystem::path& path, std::string& error) {
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+  if (ec) {
+    error = "unable to remove stale project sidecar: " + ec.message();
+    return false;
   }
   return true;
 }
@@ -229,13 +286,27 @@ ProjectStore::ProjectStore(std::filesystem::path root) : root_(std::move(root)) 
 
 ProjectRecord ProjectStore::create(const std::filesystem::path& source_path,
                                    std::string& error) const {
+  error.clear();
+  if (source_path.empty()) {
+    error = "source path is empty";
+    return {};
+  }
+
+  std::string lookup_error;
+  if (auto existing = find_by_source(source_path, lookup_error)) return *existing;
+  if (!lookup_error.empty()) {
+    error = std::move(lookup_error);
+    return {};
+  }
+
+  const auto canonical_source = normalized_source_path(source_path);
   ProjectRecord project;
-  project.project_id = make_id(source_path);
-  project.display_name = path_to_utf8(source_path.stem());
-  project.source_path = source_path;
+  project.project_id = make_id(canonical_source);
+  project.display_name = path_to_utf8(canonical_source.stem());
+  project.source_path = canonical_source;
   project.created_ms = now_ms();
   project.updated_ms = project.created_ms;
-  project.revisions.push_back({.id = make_id(source_path),
+  project.revisions.push_back({.id = make_id(canonical_source),
                                .parent_id = {},
                                .timestamp_ms = project.created_ms,
                                .kind = "ingest",
@@ -246,24 +317,38 @@ ProjectRecord ProjectStore::create(const std::filesystem::path& source_path,
 }
 
 bool ProjectStore::save(const ProjectRecord& project, std::string& error) const {
+  error.clear();
   if (project.project_id.empty() || project.source_path.empty()) {
     error = "project record is missing its id or source path";
     return false;
   }
   const auto directory = root_ / project.project_id;
-  if (!write_atomic(directory / "manifest.amt", manifest_text(project), error)) return false;
+
+  if (!project.analysis_json.empty()) {
+    if (!write_atomic(directory / "analysis-v2.json", project.analysis_json, error)) return false;
+  } else if (!remove_stale_sidecar(directory / "analysis-v2.json", error)) {
+    return false;
+  }
+
+  if (!project.master_a_graph_json.empty()) {
+    if (!write_atomic(directory / "master-a-graph.json", project.master_a_graph_json, error)) return false;
+  } else if (!remove_stale_sidecar(directory / "master-a-graph.json", error)) {
+    return false;
+  }
+
+  if (!project.master_b_graph_json.empty()) {
+    if (!write_atomic(directory / "master-b-graph.json", project.master_b_graph_json, error)) return false;
+  } else if (!remove_stale_sidecar(directory / "master-b-graph.json", error)) {
+    return false;
+  }
+
   if (!write_atomic(directory / "revisions.amtlog", revisions_text(project), error)) return false;
-  if (!project.analysis_json.empty() &&
-      !write_atomic(directory / "analysis-v2.json", project.analysis_json, error)) return false;
-  if (!project.master_a_graph_json.empty() &&
-      !write_atomic(directory / "master-a-graph.json", project.master_a_graph_json, error)) return false;
-  if (!project.master_b_graph_json.empty() &&
-      !write_atomic(directory / "master-b-graph.json", project.master_b_graph_json, error)) return false;
-  return true;
+  return write_atomic(directory / "manifest.amt", manifest_text(project), error);
 }
 
 std::optional<ProjectRecord> ProjectStore::load(const std::string& project_id,
                                                  std::string& error) const {
+  error.clear();
   const auto directory = root_ / project_id;
   const auto manifest = read_text(directory / "manifest.amt");
   if (!manifest) {
@@ -328,11 +413,41 @@ std::optional<ProjectRecord> ProjectStore::load(const std::string& project_id,
   return project;
 }
 
+std::optional<ProjectRecord> ProjectStore::find_by_source(
+    const std::filesystem::path& source_path, std::string& error) const {
+  error.clear();
+  if (source_path.empty()) return std::nullopt;
+
+  std::error_code ec;
+  if (!std::filesystem::exists(root_, ec)) {
+    if (ec) error = "unable to inspect project history: " + ec.message();
+    return std::nullopt;
+  }
+
+  std::optional<ProjectRecord> newest_match;
+  for (const auto& entry : std::filesystem::directory_iterator(root_, ec)) {
+    if (ec) break;
+    if (!entry.is_directory()) continue;
+    std::string load_error;
+    auto project = load(entry.path().filename().string(), load_error);
+    if (!project || !source_paths_match(project->source_path, source_path)) continue;
+    if (!newest_match || project->updated_ms > newest_match->updated_ms) {
+      newest_match = std::move(*project);
+    }
+  }
+  if (ec) error = "unable to enumerate project history: " + ec.message();
+  return newest_match;
+}
+
 std::vector<ProjectRecord> ProjectStore::list_recent(const std::size_t limit,
                                                      std::string& error) const {
+  error.clear();
   std::vector<ProjectRecord> projects;
   std::error_code ec;
-  if (!std::filesystem::exists(root_, ec)) return projects;
+  if (!std::filesystem::exists(root_, ec)) {
+    if (ec) error = "unable to inspect project history: " + ec.message();
+    return projects;
+  }
   for (const auto& entry : std::filesystem::directory_iterator(root_, ec)) {
     if (ec) break;
     if (!entry.is_directory()) continue;
@@ -355,6 +470,9 @@ std::vector<ProjectRecord> ProjectStore::list_recent(const std::size_t limit,
 bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
                                    std::string summary, std::filesystem::path output_path,
                                    std::string& error) const {
+  error.clear();
+  const auto previous_updated_ms = project.updated_ms;
+  const auto previous_revision_count = project.revisions.size();
   const std::string parent = project.revisions.empty() ? std::string{} : project.revisions.back().id;
   project.updated_ms = now_ms();
   project.revisions.push_back({.id = make_id(project.source_path),
@@ -363,7 +481,11 @@ bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
                                .kind = std::move(kind),
                                .summary = std::move(summary),
                                .output_path = std::move(output_path)});
-  return save(project, error);
+  if (save(project, error)) return true;
+
+  project.updated_ms = previous_updated_ms;
+  project.revisions.resize(previous_revision_count);
+  return false;
 }
 
 std::filesystem::path default_project_root() {

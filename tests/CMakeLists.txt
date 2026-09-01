@@ -184,8 +184,13 @@ if(Python3_Interpreter_FOUND)
   add_test(
     NAME phase5_calibration_tooling
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/phase5_calibration_tooling_tests.py")
-  set_tests_properties(phase5_calibration_tooling PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  add_test(
+    NAME phase5_model_registry_python_validation
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/validate_model_registry.py")
+  set_tests_properties(
+    phase5_calibration_tooling
+    phase5_model_registry_python_validation
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 else()
-  message(WARNING "Python 3 not found; Phase 5 calibration tooling tests will be skipped")
+  message(WARNING "Python 3 not found; Phase 5 Python tooling tests will be skipped")
 endif()

@@ -63,6 +63,7 @@ class FakeProvider final : public amt::separation::ISeparationProvider {
     result.sample_rate = 48000;
     result.frames = 4096;
     result.overall_confidence = confidence_;
+    result.complete_reconstruction = complete_reconstruction_;
 
     if (return_source_as_artifact_) {
       result.artifacts.push_back({.kind = amt::separation::CacheArtifactKind::stem_audio,
@@ -98,6 +99,7 @@ class FakeProvider final : public amt::separation::ISeparationProvider {
   bool return_source_as_artifact_{false};
   bool emit_stems_{true};
   bool emit_masks_{true};
+  bool complete_reconstruction_{true};
   double confidence_{0.95};
   int calls_{0};
 };

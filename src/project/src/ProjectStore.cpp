@@ -14,6 +14,8 @@
 #include <system_error>
 #include <utility>
 
+#include "amt/core/Version.h"
+
 namespace amt::project {
 namespace {
 
@@ -234,6 +236,31 @@ bool write_atomic(const std::filesystem::path& path, const std::string& content,
   return true;
 }
 
+std::optional<std::string> read_text(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) return std::nullopt;
+  std::ostringstream stream;
+  stream << input.rdbuf();
+  return stream.str();
+}
+
+bool write_immutable(const std::filesystem::path& path, const std::string& content,
+                     std::string& error) {
+  std::error_code exists_error;
+  const bool exists = std::filesystem::exists(path, exists_error);
+  if (exists_error) {
+    error = "unable to inspect revision artifact: " + exists_error.message();
+    return false;
+  }
+  if (exists) {
+    const auto existing = read_text(path);
+    if (existing && *existing == content) return true;
+    error = "refusing to rewrite immutable revision artifact: " + path_to_utf8(path);
+    return false;
+  }
+  return write_atomic(path, content, error);
+}
+
 bool remove_stale_sidecar(const std::filesystem::path& path, std::string& error) {
   std::error_code ec;
   std::filesystem::remove(path, ec);
@@ -242,14 +269,6 @@ bool remove_stale_sidecar(const std::filesystem::path& path, std::string& error)
     return false;
   }
   return true;
-}
-
-std::optional<std::string> read_text(const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) return std::nullopt;
-  std::ostringstream stream;
-  stream << input.rdbuf();
-  return stream.str();
 }
 
 std::vector<std::string> split_tabs(const std::string& line) {
@@ -319,6 +338,73 @@ std::string revisions_text(const ProjectRecord& project) {
            << hex_encode(revision.summary) << '\t' << encode_path(revision.output_path) << '\n';
   }
   return output.str();
+}
+
+std::string revision_metadata_text(const ProjectRecord& project, const RevisionNode& revision) {
+  std::ostringstream output;
+  output << "schema=1\n"
+         << "project_id=" << hex_encode(project.project_id) << '\n'
+         << "revision_id=" << hex_encode(revision.id) << '\n'
+         << "parent_id=" << hex_encode(revision.parent_id) << '\n'
+         << "timestamp_ms=" << revision.timestamp_ms << '\n'
+         << "kind=" << hex_encode(revision.kind) << '\n'
+         << "summary=" << hex_encode(revision.summary) << '\n'
+         << "output_path=" << encode_path(revision.output_path) << '\n'
+         << "engine_version=" << hex_encode(std::string(amt::core::version())) << '\n';
+  return output.str();
+}
+
+std::string candidate_snapshot_text(const ProjectRecord& project) {
+  std::ostringstream output;
+  output << std::setprecision(17)
+         << "schema=1\n"
+         << "selected=" << selection_name(project.selected) << '\n'
+         << "source_lufs=" << project.source_integrated_lufs << '\n'
+         << "master_a_available=" << (project.master_a.available ? 1 : 0) << '\n'
+         << "master_a_path=" << encode_path(project.master_a.path) << '\n'
+         << "master_a_lufs=" << project.master_a.integrated_lufs << '\n'
+         << "master_a_dbtp=" << project.master_a.true_peak_dbtp << '\n'
+         << "master_a_recommended=" << (project.master_a.recommended ? 1 : 0) << '\n'
+         << "master_b_available=" << (project.master_b.available ? 1 : 0) << '\n'
+         << "master_b_path=" << encode_path(project.master_b.path) << '\n'
+         << "master_b_lufs=" << project.master_b.integrated_lufs << '\n'
+         << "master_b_dbtp=" << project.master_b.true_peak_dbtp << '\n'
+         << "master_b_recommended=" << (project.master_b.recommended ? 1 : 0) << '\n';
+  return output.str();
+}
+
+bool write_revision_artifacts(const std::filesystem::path& project_directory,
+                              const ProjectRecord& project, std::string& error) {
+  if (project.revisions.empty()) return true;
+  const auto& revision = project.revisions.back();
+  const auto directory = project_directory / "revisions" / revision.id;
+  if (!write_immutable(directory / "revision.amt",
+                       revision_metadata_text(project, revision), error)) {
+    return false;
+  }
+
+  if (revision.kind == "analysis" && !project.analysis_json.empty()) {
+    if (!write_immutable(directory / "analysis-v2.json", project.analysis_json, error)) return false;
+  }
+
+  if (revision.kind == "mastering") {
+    if (!write_immutable(directory / "candidates.amt",
+                         candidate_snapshot_text(project), error)) {
+      return false;
+    }
+    if (!project.master_a_graph_json.empty() &&
+        !write_immutable(directory / "master-a-graph.json",
+                         project.master_a_graph_json, error)) {
+      return false;
+    }
+    if (!project.master_b_graph_json.empty() &&
+        !write_immutable(directory / "master-b-graph.json",
+                         project.master_b_graph_json, error)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 }  // namespace
@@ -418,6 +504,7 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
     return false;
   }
 
+  if (!write_revision_artifacts(directory, persisted, error)) return false;
   if (!write_atomic(directory / "revisions.amtlog", revisions_text(persisted), error)) return false;
   return write_atomic(manifest_path, manifest_text(persisted), error);
 }

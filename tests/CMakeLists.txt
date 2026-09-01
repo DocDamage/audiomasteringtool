@@ -43,3 +43,11 @@ target_link_libraries(amt_phase3_planner_tests PRIVATE
   amt_mastering
 )
 add_test(NAME phase3_analysis_aware_planner COMMAND amt_phase3_planner_tests)
+
+add_executable(amt_phase4_tests phase4_tests.cpp)
+target_link_libraries(amt_phase4_tests PRIVATE
+  amt_core
+  amt_codec
+  amt_project
+)
+add_test(NAME phase4_project_history_and_export_recipes COMMAND amt_phase4_tests)

@@ -1,20 +1,46 @@
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
 
+#include "amt/analysis/FileAnalyzer.h"
+#include "amt/codec/AudioIO.h"
+#include "amt/codec/SndFileCodec.h"
 #include "amt/codec/SndFileDynamic.h"
 #include "amt/core/Version.h"
+#include "amt/playback/Transport.h"
 
 namespace {
+
 void usage() {
-  std::cout << "AudioMasteringTool Phase 0 CLI\n"
+  std::cout << "AudioMasteringTool Phase 1 CLI\n"
             << "  amt_cli --version\n"
             << "  amt_cli codec-status\n"
-            << "  amt_cli probe <input.wav|input.flac>\n"
-            << "  amt_cli rerender <input> <output>\n"
-            << "  amt_cli verify <first> <second>\n";
+            << "  amt_cli probe <input>\n"
+            << "  amt_cli analyze <input>\n"
+            << "  amt_cli export <input> <output> [--sample-rate N] [--bits 16|24|32|float]\n"
+            << "  amt_cli play <input>\n"
+            << "  amt_cli rerender <input> <output>   # Phase 0 bit-exact compatibility\n"
+            << "  amt_cli verify <first> <second>     # Phase 0 decoded-PCM comparison\n";
 }
+
+std::optional<amt::codec::AudioSampleFormat> parse_bits(const std::string& value) {
+  if (value == "16") return amt::codec::AudioSampleFormat::pcm16;
+  if (value == "24") return amt::codec::AudioSampleFormat::pcm24;
+  if (value == "32") return amt::codec::AudioSampleFormat::pcm32;
+  if (value == "float") return amt::codec::AudioSampleFormat::float32;
+  return std::nullopt;
 }
+
+void print_probe(const amt::codec::AudioMetadata& info) {
+  std::cout << "container=" << info.container_name << " format=" << info.sample_format_name
+            << " rate=" << info.sample_rate << " channels=" << info.channels
+            << " frames=" << info.frames << " bits=" << info.bit_depth
+            << " seekable=" << (info.seekable ? "yes" : "no") << '\n';
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   if (argc < 2) {
@@ -28,45 +54,121 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  amt::codec::SndFileRuntime runtime;
+  amt::codec::SndFileCodecService codecs;
   if (command == "codec-status") {
-    if (!runtime.available()) {
-      std::cerr << "unavailable: " << runtime.load_error() << '\n';
+    if (!codecs.available()) {
+      std::cerr << "unavailable: " << codecs.backend_error() << '\n';
       return 1;
     }
-    std::cout << "libsndfile: available\n";
+    std::cout << codecs.backend_name() << '\n';
+    for (const auto& capability : codecs.capabilities()) {
+      std::cout << "  " << capability.name << " decode=" << capability.decode
+                << " encode=" << capability.encode << " lossless=" << capability.lossless << '\n';
+    }
     return 0;
   }
 
-  if (!runtime.available()) {
-    std::cerr << "codec error: " << runtime.load_error() << '\n';
+  if (!codecs.available()) {
+    std::cerr << "codec error: " << codecs.backend_error() << '\n';
     return 1;
   }
 
   std::string error;
   if (command == "probe" && argc == 3) {
-    const auto info = runtime.probe(argv[2], error);
+    const auto info = codecs.probe(argv[2], error);
     if (!info) {
       std::cerr << "probe failed: " << error << '\n';
       return 1;
     }
-    std::cout << "container=" << info->container << " subtype=" << info->subtype
-              << " rate=" << info->sample_rate << " channels=" << info->channels
-              << " frames=" << info->frames << '\n';
+    print_probe(*info);
     return 0;
   }
 
+  if (command == "analyze" && argc == 3) {
+    const auto report = amt::analysis::analyze_file(codecs, argv[2], error);
+    if (!report) {
+      std::cerr << "analysis failed: " << error << '\n';
+      return 1;
+    }
+    print_probe(report->metadata);
+    std::cout << std::fixed << std::setprecision(3)
+              << "integrated_lufs=" << report->loudness.integrated_lufs << '\n'
+              << "momentary_max_lufs=" << report->loudness.max_momentary_lufs << '\n'
+              << "short_term_max_lufs=" << report->loudness.max_short_term_lufs << '\n'
+              << "lra_lu=" << report->loudness.loudness_range_lu << '\n'
+              << "sample_peak_dbfs=" << report->loudness.sample_peak_dbfs << '\n'
+              << "true_peak_dbtp=" << report->loudness.true_peak_dbtp << '\n'
+              << "crest_factor_db=" << report->loudness.crest_factor_db << '\n'
+              << "plr_db=" << report->loudness.peak_to_loudness_ratio_db << '\n'
+              << "spectral_centroid_hz=" << report->spectrum.centroid_hz << '\n'
+              << "spectral_rolloff85_hz=" << report->spectrum.rolloff_85_hz << '\n'
+              << "stereo_correlation=" << report->stereo.correlation << '\n'
+              << "low_width=" << report->stereo.low_band_width << '\n'
+              << "mid_width=" << report->stereo.mid_band_width << '\n'
+              << "high_width=" << report->stereo.high_band_width << '\n'
+              << "mono_delta_db=" << report->stereo.mono_fold_down_delta_db << '\n'
+              << "clipped_samples=" << report->integrity.clipped_samples << '\n'
+              << "nan_samples=" << report->integrity.nan_samples << '\n'
+              << "infinite_samples=" << report->integrity.infinite_samples << '\n'
+              << "dc_offset=" << report->integrity.max_absolute_dc_offset << '\n'
+              << "waveform_levels=" << report->waveform.levels.size() << '\n';
+    return 0;
+  }
+
+  if (command == "export" && argc >= 4) {
+    amt::codec::ExportRequest request;
+    for (int index = 4; index < argc; ++index) {
+      const std::string option = argv[index];
+      if (option == "--sample-rate" && index + 1 < argc) {
+        try {
+          request.sample_rate = std::stoi(argv[++index]);
+        } catch (...) {
+          std::cerr << "invalid --sample-rate\n";
+          return 2;
+        }
+      } else if (option == "--bits" && index + 1 < argc) {
+        const auto format = parse_bits(argv[++index]);
+        if (!format) {
+          std::cerr << "invalid --bits value\n";
+          return 2;
+        }
+        request.sample_format = *format;
+      } else {
+        std::cerr << "unknown export option: " << option << '\n';
+        return 2;
+      }
+    }
+    if (!amt::codec::export_audio(codecs, argv[2], argv[3], request, error)) {
+      std::cerr << "export failed: " << error << '\n';
+      return 1;
+    }
+    std::cout << "export: ok\n";
+    return 0;
+  }
+
+  if (command == "play" && argc == 3) {
+    amt::playback::Transport transport(codecs);
+    if (!transport.load(argv[2], error) || !transport.play(error)) {
+      std::cerr << "playback failed: " << error << '\n';
+      return 1;
+    }
+    std::cout << "playing via " << transport.output_backend_name() << '\n';
+    transport.wait_until_finished();
+    return 0;
+  }
+
+  // Preserve the Phase 0 bit-exact proof commands while production code migrates to ICodecService.
+  amt::codec::SndFileRuntime legacy_runtime;
   if (command == "rerender" && argc == 4) {
-    if (!runtime.lossless_rerender(argv[2], argv[3], error)) {
+    if (!legacy_runtime.lossless_rerender(argv[2], argv[3], error)) {
       std::cerr << "rerender failed: " << error << '\n';
       return 1;
     }
     std::cout << "rerender: ok\n";
     return 0;
   }
-
   if (command == "verify" && argc == 4) {
-    if (!runtime.verify_pcm_equal(argv[2], argv[3], error)) {
+    if (!legacy_runtime.verify_pcm_equal(argv[2], argv[3], error)) {
       std::cerr << "verify failed: " << error << '\n';
       return 1;
     }

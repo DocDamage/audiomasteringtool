@@ -459,6 +459,7 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
     error = "unable to inspect existing project manifest: " + exists_error.message();
     return false;
   }
+  bool revision_added = !manifest_exists;
   if (manifest_exists) {
     std::string load_error;
     const auto existing = load(project.project_id, load_error);
@@ -476,6 +477,7 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
 
     const bool caller_added_revision =
         disk_is_prefix && project.revisions.size() > existing->revisions.size();
+    revision_added = caller_added_revision;
     if (caller_is_prefix && existing->revisions.size() > project.revisions.size()) {
       persisted.revisions = existing->revisions;
       persisted.updated_ms = std::max(persisted.updated_ms, existing->updated_ms);
@@ -483,6 +485,7 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
 
     if (existing->selected != project.selected && !caller_added_revision) {
       append_selection_revision(persisted);
+      revision_added = true;
     }
   }
 
@@ -504,7 +507,7 @@ bool ProjectStore::save(const ProjectRecord& project, std::string& error) const 
     return false;
   }
 
-  if (!write_revision_artifacts(directory, persisted, error)) return false;
+  if (revision_added && !write_revision_artifacts(directory, persisted, error)) return false;
   if (!write_atomic(directory / "revisions.amtlog", revisions_text(persisted), error)) return false;
   return write_atomic(manifest_path, manifest_text(persisted), error);
 }

@@ -78,6 +78,7 @@ struct SeparationResult {
   int sample_rate{0};
   std::int64_t frames{0};
   double overall_confidence{0.0};
+  bool complete_reconstruction{false};
   std::vector<SeparationArtifactReference> artifacts;
 };
 
@@ -168,6 +169,7 @@ struct SeparationCacheEntry {
   int sample_rate{0};
   std::int64_t frames{0};
   double overall_confidence{0.0};
+  bool complete_reconstruction{false};
   std::vector<CachedArtifact> artifacts;
 };
 

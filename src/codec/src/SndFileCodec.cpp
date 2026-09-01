@@ -1,10 +1,10 @@
 #include "amt/codec/SndFileCodec.h"
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -39,16 +39,11 @@ constexpr int kSubtypeMask = 0x0000FFFF;
 constexpr int kWav = 0x010000;
 constexpr int kAiff = 0x020000;
 constexpr int kFlac = 0x170000;
-constexpr int kOgg = 0x200000;
-constexpr int kMpeg = 0x230000;
 constexpr int kPcm16 = 0x0002;
 constexpr int kPcm24 = 0x0003;
 constexpr int kPcm32 = 0x0004;
 constexpr int kFloat = 0x0006;
 constexpr int kDouble = 0x0007;
-constexpr int kVorbis = 0x0060;
-constexpr int kOpus = 0x0064;
-constexpr int kMpegLayer3 = 0x0082;
 constexpr int kStringTitle = 0x01;
 constexpr int kStringCopyright = 0x02;
 constexpr int kStringSoftware = 0x03;
@@ -81,7 +76,9 @@ using SymbolHandle = FARPROC;
 void close_module(ModuleHandle handle) {
   if (handle != nullptr) FreeLibrary(handle);
 }
-SymbolHandle load_symbol(ModuleHandle handle, const char* name) { return GetProcAddress(handle, name); }
+SymbolHandle load_symbol(ModuleHandle handle, const char* name) {
+  return GetProcAddress(handle, name);
+}
 ModuleHandle open_module() {
   constexpr std::array<const wchar_t*, 3> names = {
       L"sndfile.dll", L"libsndfile-1.dll", L"libsndfile.dll"};
@@ -96,7 +93,9 @@ using SymbolHandle = void*;
 void close_module(ModuleHandle handle) {
   if (handle != nullptr) dlclose(handle);
 }
-SymbolHandle load_symbol(ModuleHandle handle, const char* name) { return dlsym(handle, name); }
+SymbolHandle load_symbol(ModuleHandle handle, const char* name) {
+  return dlsym(handle, name);
+}
 ModuleHandle open_module() {
 #if defined(__APPLE__)
   constexpr std::array<const char*, 3> names = {
@@ -116,7 +115,12 @@ T resolve(ModuleHandle module, const char* name) {
   return reinterpret_cast<T>(load_symbol(module, name));
 }
 
-AudioContainer container_from_format(const int format) {
+bool is_phase1_container(const AudioContainer container) noexcept {
+  return container == AudioContainer::wav || container == AudioContainer::aiff ||
+         container == AudioContainer::flac;
+}
+
+AudioContainer container_from_format(const int format) noexcept {
   switch (format & kTypeMask) {
     case kWav:
       return AudioContainer::wav;
@@ -124,16 +128,12 @@ AudioContainer container_from_format(const int format) {
       return AudioContainer::aiff;
     case kFlac:
       return AudioContainer::flac;
-    case kOgg:
-      return AudioContainer::ogg;
-    case kMpeg:
-      return AudioContainer::mp3;
     default:
       return AudioContainer::unknown;
   }
 }
 
-AudioSampleFormat sample_format_from_format(const int format) {
+AudioSampleFormat sample_format_from_format(const int format) noexcept {
   switch (format & kSubtypeMask) {
     case kPcm16:
       return AudioSampleFormat::pcm16;
@@ -145,16 +145,12 @@ AudioSampleFormat sample_format_from_format(const int format) {
       return AudioSampleFormat::float32;
     case kDouble:
       return AudioSampleFormat::float64;
-    case kVorbis:
-    case kOpus:
-    case kMpegLayer3:
-      return AudioSampleFormat::compressed;
     default:
       return AudioSampleFormat::unknown;
   }
 }
 
-std::string container_name(const AudioContainer container) {
+const char* container_name(const AudioContainer container) noexcept {
   switch (container) {
     case AudioContainer::wav:
       return "WAV";
@@ -162,20 +158,12 @@ std::string container_name(const AudioContainer container) {
       return "AIFF";
     case AudioContainer::flac:
       return "FLAC";
-    case AudioContainer::ogg:
-      return "OGG";
-    case AudioContainer::mp3:
-      return "MP3";
-    case AudioContainer::opus:
-      return "Opus";
-    case AudioContainer::aac_m4a:
-      return "AAC/M4A";
     default:
       return "unknown";
   }
 }
 
-std::string sample_format_name(const AudioSampleFormat format) {
+const char* sample_format_name(const AudioSampleFormat format) noexcept {
   switch (format) {
     case AudioSampleFormat::pcm16:
       return "PCM_16";
@@ -187,14 +175,28 @@ std::string sample_format_name(const AudioSampleFormat format) {
       return "FLOAT_32";
     case AudioSampleFormat::float64:
       return "FLOAT_64";
-    case AudioSampleFormat::compressed:
-      return "compressed";
     default:
       return "unknown";
   }
 }
 
-int format_code(const AudioContainer container, const AudioSampleFormat sample_format) {
+int bit_depth(const AudioSampleFormat format) noexcept {
+  switch (format) {
+    case AudioSampleFormat::pcm16:
+      return 16;
+    case AudioSampleFormat::pcm24:
+      return 24;
+    case AudioSampleFormat::pcm32:
+    case AudioSampleFormat::float32:
+      return 32;
+    case AudioSampleFormat::float64:
+      return 64;
+    default:
+      return 0;
+  }
+}
+
+int format_code(const AudioContainer container, const AudioSampleFormat sample_format) noexcept {
   int major = 0;
   switch (container) {
     case AudioContainer::wav:
@@ -206,15 +208,10 @@ int format_code(const AudioContainer container, const AudioSampleFormat sample_f
     case AudioContainer::flac:
       major = kFlac;
       break;
-    case AudioContainer::ogg:
-      major = kOgg;
-      break;
-    case AudioContainer::mp3:
-      major = kMpeg;
-      break;
     default:
       return 0;
   }
+
   int subtype = 0;
   switch (sample_format) {
     case AudioSampleFormat::pcm16:
@@ -232,30 +229,10 @@ int format_code(const AudioContainer container, const AudioSampleFormat sample_f
     case AudioSampleFormat::float64:
       subtype = kDouble;
       break;
-    case AudioSampleFormat::compressed:
-      subtype = container == AudioContainer::ogg ? kVorbis :
-                (container == AudioContainer::mp3 ? kMpegLayer3 : 0);
-      break;
     default:
       return 0;
   }
-  return subtype == 0 ? 0 : major | subtype;
-}
-
-int bit_depth(const AudioSampleFormat format) {
-  switch (format) {
-    case AudioSampleFormat::pcm16:
-      return 16;
-    case AudioSampleFormat::pcm24:
-      return 24;
-    case AudioSampleFormat::pcm32:
-    case AudioSampleFormat::float32:
-      return 32;
-    case AudioSampleFormat::float64:
-      return 64;
-    default:
-      return 0;
-  }
+  return major | subtype;
 }
 
 }  // namespace
@@ -309,18 +286,23 @@ struct SndFileCodecService::Impl {
     }
 
     ~Api() { close_module(module); }
+
     [[nodiscard]] bool ready() const noexcept { return module != nullptr; }
 
-    SndFile* open_path(const std::filesystem::path& path, const int mode, SfInfo* info) const {
+    [[nodiscard]] SndFile* open_path(
+        const std::filesystem::path& path, const int mode, SfInfo* info) const {
 #ifdef _WIN32
       if (wchar_open != nullptr) return wchar_open(path.c_str(), mode, info);
 #endif
       return open(path.string().c_str(), mode, info);
     }
 
-    [[nodiscard]] std::string last_error(SndFile* file, const std::string& fallback) const {
+    [[nodiscard]] std::string last_error(
+        SndFile* file, const std::string& fallback) const {
       if (strerror_fn != nullptr) {
-        if (const char* text = strerror_fn(file); text != nullptr && text[0] != '\0') return text;
+        if (const char* text = strerror_fn(file); text != nullptr && text[0] != '\0') {
+          return text;
+        }
       }
       return fallback;
     }
@@ -335,16 +317,31 @@ std::map<std::string, std::string> read_tags(
     const std::shared_ptr<SndFileCodecService::Impl::Api>& api, SndFile* file) {
   std::map<std::string, std::string> tags;
   if (api->get_string == nullptr) return tags;
-  const std::array<std::pair<int, const char*>, 10> keys = {{{kStringTitle, "title"},
-      {kStringCopyright, "copyright"}, {kStringSoftware, "software"}, {kStringArtist, "artist"},
-      {kStringComment, "comment"}, {kStringDate, "date"}, {kStringAlbum, "album"},
-      {kStringLicense, "license"}, {kStringTrackNumber, "track"}, {kStringGenre, "genre"}}};
+  constexpr std::array<std::pair<int, const char*>, 10> keys = {{{kStringTitle, "title"},
+      {kStringCopyright, "copyright"}, {kStringSoftware, "software"},
+      {kStringArtist, "artist"}, {kStringComment, "comment"}, {kStringDate, "date"},
+      {kStringAlbum, "album"}, {kStringLicense, "license"},
+      {kStringTrackNumber, "track"}, {kStringGenre, "genre"}}};
   for (const auto& [id, name] : keys) {
     if (const char* value = api->get_string(file, id); value != nullptr && value[0] != '\0') {
       tags.emplace(name, value);
     }
   }
   return tags;
+}
+
+void write_tags(const std::shared_ptr<SndFileCodecService::Impl::Api>& api, SndFile* file,
+                const std::map<std::string, std::string>& tags) {
+  if (api->set_string == nullptr) return;
+  constexpr std::array<std::pair<const char*, int>, 10> keys = {{{"title", kStringTitle},
+      {"copyright", kStringCopyright}, {"software", kStringSoftware},
+      {"artist", kStringArtist}, {"comment", kStringComment}, {"date", kStringDate},
+      {"album", kStringAlbum}, {"license", kStringLicense},
+      {"track", kStringTrackNumber}, {"genre", kStringGenre}}};
+  for (const auto& [name, id] : keys) {
+    const auto iterator = tags.find(name);
+    if (iterator != tags.end()) api->set_string(file, id, iterator->second.c_str());
+  }
 }
 
 AudioMetadata make_metadata(
@@ -357,6 +354,7 @@ AudioMetadata make_metadata(
           .channels = info.channels,
           .bit_depth = bit_depth(sample_format),
           .seekable = info.seekable != 0,
+          .channel_layout = channel_layout_from_count(info.channels),
           .container = container,
           .sample_format = sample_format,
           .container_name = container_name(container),
@@ -364,17 +362,23 @@ AudioMetadata make_metadata(
           .tags = read_tags(api, file)};
 }
 
+bool valid_phase1_metadata(const AudioMetadata& metadata) noexcept {
+  return is_phase1_container(metadata.container) &&
+         metadata.sample_format != AudioSampleFormat::unknown;
+}
+
 class SndFileDecoder final : public IAudioDecoder {
  public:
   SndFileDecoder(std::shared_ptr<SndFileCodecService::Impl::Api> api, SndFile* file,
                  AudioMetadata metadata)
       : api_(std::move(api)), file_(file), metadata_(std::move(metadata)) {}
+
   ~SndFileDecoder() override {
     if (file_ != nullptr) api_->close(file_);
   }
 
-  const AudioMetadata& metadata() const noexcept override { return metadata_; }
-  std::int64_t tell() const noexcept override { return position_; }
+  [[nodiscard]] const AudioMetadata& metadata() const noexcept override { return metadata_; }
+  [[nodiscard]] std::int64_t tell() const noexcept override { return position_; }
 
   bool seek(const std::int64_t frame, std::string& error) override {
     if (!metadata_.seekable) {
@@ -406,13 +410,16 @@ class SndFileDecoder final : public IAudioDecoder {
       output.resize(static_cast<std::size_t>(metadata_.channels), 0U);
       return true;
     }
-    std::vector<float> interleaved(max_frames * static_cast<std::size_t>(metadata_.channels));
+
+    std::vector<float> interleaved(
+        max_frames * static_cast<std::size_t>(metadata_.channels));
     const auto read_count = api_->read_frames_float(
         file_, interleaved.data(), static_cast<SfCount>(max_frames));
     if (read_count < 0 || (read_count == 0 && api_->error_fn(file_) != 0)) {
       error = api_->last_error(file_, "audio read failed");
       return false;
     }
+
     frames_read = static_cast<std::size_t>(read_count);
     interleaved.resize(frames_read * static_cast<std::size_t>(metadata_.channels));
     output = amt::audio::AudioBuffer::from_interleaved(
@@ -433,6 +440,7 @@ class SndFileEncoder final : public IAudioEncoder {
   SndFileEncoder(std::shared_ptr<SndFileCodecService::Impl::Api> api, SndFile* file,
                  const int channels)
       : api_(std::move(api)), file_(file), channels_(channels) {}
+
   ~SndFileEncoder() override {
     if (file_ != nullptr) api_->close(file_);
   }
@@ -451,6 +459,7 @@ class SndFileEncoder final : public IAudioEncoder {
       error = "encoder channel-count mismatch";
       return false;
     }
+
     std::vector<float> interleaved;
     input.to_interleaved(interleaved);
     const auto written = api_->write_frames_float(
@@ -479,19 +488,6 @@ class SndFileEncoder final : public IAudioEncoder {
   int channels_{0};
 };
 
-void write_tags(const std::shared_ptr<SndFileCodecService::Impl::Api>& api, SndFile* file,
-                const std::map<std::string, std::string>& tags) {
-  if (api->set_string == nullptr) return;
-  const std::array<std::pair<const char*, int>, 10> keys = {{{"title", kStringTitle},
-      {"copyright", kStringCopyright}, {"software", kStringSoftware}, {"artist", kStringArtist},
-      {"comment", kStringComment}, {"date", kStringDate}, {"album", kStringAlbum},
-      {"license", kStringLicense}, {"track", kStringTrackNumber}, {"genre", kStringGenre}}};
-  for (const auto& [name, id] : keys) {
-    const auto iterator = tags.find(name);
-    if (iterator != tags.end()) api->set_string(file, id, iterator->second.c_str());
-  }
-}
-
 }  // namespace
 
 SndFileCodecService::SndFileCodecService() : impl_(std::make_unique<Impl>()) {}
@@ -510,7 +506,8 @@ std::string SndFileCodecService::backend_name() const {
 }
 
 std::string SndFileCodecService::backend_error() const {
-  return impl_ == nullptr || impl_->api == nullptr ? "codec service moved-from" : impl_->api->load_error;
+  return impl_ == nullptr || impl_->api == nullptr ? "codec service moved-from"
+                                                   : impl_->api->load_error;
 }
 
 std::vector<CodecCapability> SndFileCodecService::capabilities() const {
@@ -540,6 +537,11 @@ std::optional<AudioMetadata> SndFileCodecService::probe(
     error = backend_error();
     return std::nullopt;
   }
+  if (!is_phase1_container(container_from_extension(path))) {
+    error = "input extension is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
+    return std::nullopt;
+  }
+
   SfInfo info{};
   SndFile* file = impl_->api->open_path(path, kReadMode, &info);
   if (file == nullptr) {
@@ -548,9 +550,8 @@ std::optional<AudioMetadata> SndFileCodecService::probe(
   }
   auto metadata = make_metadata(impl_->api, file, info);
   impl_->api->close(file);
-  if (metadata.container == AudioContainer::unknown ||
-      metadata.sample_format == AudioSampleFormat::unknown) {
-    error = "audio format is not supported by the Phase 1 production codec backend";
+  if (!valid_phase1_metadata(metadata)) {
+    error = "audio format is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
     return std::nullopt;
   }
   return metadata;
@@ -562,6 +563,11 @@ std::unique_ptr<IAudioDecoder> SndFileCodecService::open_decoder(
     error = backend_error();
     return nullptr;
   }
+  if (!is_phase1_container(container_from_extension(path))) {
+    error = "input extension is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
+    return nullptr;
+  }
+
   SfInfo info{};
   SndFile* file = impl_->api->open_path(path, kReadMode, &info);
   if (file == nullptr) {
@@ -569,10 +575,9 @@ std::unique_ptr<IAudioDecoder> SndFileCodecService::open_decoder(
     return nullptr;
   }
   auto metadata = make_metadata(impl_->api, file, info);
-  if (metadata.container == AudioContainer::unknown ||
-      metadata.sample_format == AudioSampleFormat::unknown) {
+  if (!valid_phase1_metadata(metadata)) {
     impl_->api->close(file);
-    error = "decoder format is outside the controlled Phase 1 codec set";
+    error = "decoder format is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
     return nullptr;
   }
   return std::make_unique<SndFileDecoder>(impl_->api, file, std::move(metadata));
@@ -585,18 +590,25 @@ std::unique_ptr<IAudioEncoder> SndFileCodecService::open_encoder(
     error = backend_error();
     return nullptr;
   }
+  if (!is_phase1_container(settings.container) ||
+      container_from_extension(path) != settings.container) {
+    error = "output path/container is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
+    return nullptr;
+  }
   if (settings.sample_rate <= 0 || settings.channels <= 0) {
     error = "invalid encoder sample rate or channel count";
     return nullptr;
   }
+
   SfInfo info{};
   info.samplerate = settings.sample_rate;
   info.channels = settings.channels;
   info.format = format_code(settings.container, settings.sample_format);
   if (info.format == 0 || impl_->api->format_check(&info) == 0) {
-    error = "requested output format is not supported by libsndfile";
+    error = "requested output sample format is unsupported for the selected Phase 1 container";
     return nullptr;
   }
+
   SndFile* file = impl_->api->open_path(path, kWriteMode, &info);
   if (file == nullptr) {
     error = impl_->api->last_error(nullptr, "unable to open audio encoder");

@@ -9,16 +9,20 @@
 #include "amt/codec/SndFileCodec.h"
 #include "amt/codec/SndFileDynamic.h"
 #include "amt/core/Version.h"
+#include "amt/mastering/OfflineRenderer.h"
+#include "amt/mastering/Planner.h"
 #include "amt/playback/Transport.h"
 
 namespace {
 
 void usage() {
-  std::cout << "AudioMasteringTool Phase 1 CLI\n"
+  std::cout << "AudioMasteringTool Phase 2 CLI\n"
             << "  amt_cli --version\n"
             << "  amt_cli codec-status\n"
             << "  amt_cli probe <input>\n"
             << "  amt_cli analyze <input>\n"
+            << "  amt_cli plan <input>\n"
+            << "  amt_cli master <input> <output-directory> [--bits 16|24|32|float]\n"
             << "  amt_cli export <input> <output> [--sample-rate N] [--bits 16|24|32|float]\n"
             << "  amt_cli compare <first> <second> [--tolerance value]\n"
             << "  amt_cli play <input>\n"
@@ -39,6 +43,41 @@ void print_probe(const amt::codec::AudioMetadata& info) {
             << " rate=" << info.sample_rate << " channels=" << info.channels
             << " frames=" << info.frames << " bits=" << info.bit_depth
             << " seekable=" << (info.seekable ? "yes" : "no") << '\n';
+}
+
+void print_candidate(const amt::mastering::MasteringCandidatePlan& candidate) {
+  std::cout << candidate.name << " (" << candidate.id << ")"
+            << (candidate.recommended ? " [Recommended]" : "") << '\n'
+            << "  target_lufs=" << candidate.target_lufs
+            << " ceiling_dbtp=" << candidate.ceiling_dbtp
+            << " preservation_bias=" << candidate.preservation_bias << '\n';
+  for (const auto& reason : candidate.rationale) std::cout << "  - " << reason << '\n';
+  std::cout << "  graph=" << candidate.graph.to_json() << '\n';
+}
+
+void print_analysis(const amt::analysis::Phase1AnalysisReport& report) {
+  print_probe(report.metadata);
+  std::cout << std::fixed << std::setprecision(3)
+            << "integrated_lufs=" << report.loudness.integrated_lufs << '\n'
+            << "momentary_max_lufs=" << report.loudness.max_momentary_lufs << '\n'
+            << "short_term_max_lufs=" << report.loudness.max_short_term_lufs << '\n'
+            << "lra_lu=" << report.loudness.loudness_range_lu << '\n'
+            << "sample_peak_dbfs=" << report.loudness.sample_peak_dbfs << '\n'
+            << "true_peak_dbtp=" << report.loudness.true_peak_dbtp << '\n'
+            << "crest_factor_db=" << report.loudness.crest_factor_db << '\n'
+            << "plr_db=" << report.loudness.peak_to_loudness_ratio_db << '\n'
+            << "spectral_centroid_hz=" << report.spectrum.centroid_hz << '\n'
+            << "spectral_rolloff85_hz=" << report.spectrum.rolloff_85_hz << '\n'
+            << "stereo_correlation=" << report.stereo.correlation << '\n'
+            << "low_width=" << report.stereo.low_band_width << '\n'
+            << "mid_width=" << report.stereo.mid_band_width << '\n'
+            << "high_width=" << report.stereo.high_band_width << '\n'
+            << "mono_delta_db=" << report.stereo.mono_fold_down_delta_db << '\n'
+            << "clipped_samples=" << report.integrity.clipped_samples << '\n'
+            << "nan_samples=" << report.integrity.nan_samples << '\n'
+            << "infinite_samples=" << report.integrity.infinite_samples << '\n'
+            << "dc_offset=" << report.integrity.max_absolute_dc_offset << '\n'
+            << "waveform_levels=" << report.waveform.levels.size() << '\n';
 }
 
 }  // namespace
@@ -91,28 +130,63 @@ int main(int argc, char** argv) {
       std::cerr << "analysis failed: " << error << '\n';
       return 1;
     }
-    print_probe(report->metadata);
+    print_analysis(*report);
+    return 0;
+  }
+
+  if (command == "plan" && argc == 3) {
+    const auto report = amt::analysis::analyze_file(codecs, argv[2], error);
+    if (!report) {
+      std::cerr << "analysis failed: " << error << '\n';
+      return 1;
+    }
+    const auto plan = amt::mastering::plan_mastering(*report);
+    print_candidate(plan.master_a);
+    print_candidate(plan.master_b);
+    return 0;
+  }
+
+  if (command == "master" && argc >= 4) {
+    amt::mastering::RenderSettings settings;
+    for (int index = 4; index < argc; ++index) {
+      const std::string option = argv[index];
+      if (option == "--bits" && index + 1 < argc) {
+        const auto format = parse_bits(argv[++index]);
+        if (!format) {
+          std::cerr << "invalid --bits value\n";
+          return 2;
+        }
+        settings.sample_format = *format;
+      } else {
+        std::cerr << "unknown master option: " << option << '\n';
+        return 2;
+      }
+    }
+    const auto report = amt::analysis::analyze_file(codecs, argv[2], error);
+    if (!report) {
+      std::cerr << "analysis failed: " << error << '\n';
+      return 1;
+    }
+    const auto plan = amt::mastering::plan_mastering(*report);
+    std::cout << "Generating two deterministic masters...\n";
+    const auto rendered = amt::mastering::render_mastering_plan(
+        codecs, argv[2], argv[3], *report, plan, error, settings);
+    if (!rendered) {
+      std::cerr << "mastering failed: " << error << '\n';
+      return 1;
+    }
     std::cout << std::fixed << std::setprecision(3)
-              << "integrated_lufs=" << report->loudness.integrated_lufs << '\n'
-              << "momentary_max_lufs=" << report->loudness.max_momentary_lufs << '\n'
-              << "short_term_max_lufs=" << report->loudness.max_short_term_lufs << '\n'
-              << "lra_lu=" << report->loudness.loudness_range_lu << '\n'
-              << "sample_peak_dbfs=" << report->loudness.sample_peak_dbfs << '\n'
-              << "true_peak_dbtp=" << report->loudness.true_peak_dbtp << '\n'
-              << "crest_factor_db=" << report->loudness.crest_factor_db << '\n'
-              << "plr_db=" << report->loudness.peak_to_loudness_ratio_db << '\n'
-              << "spectral_centroid_hz=" << report->spectrum.centroid_hz << '\n'
-              << "spectral_rolloff85_hz=" << report->spectrum.rolloff_85_hz << '\n'
-              << "stereo_correlation=" << report->stereo.correlation << '\n'
-              << "low_width=" << report->stereo.low_band_width << '\n'
-              << "mid_width=" << report->stereo.mid_band_width << '\n'
-              << "high_width=" << report->stereo.high_band_width << '\n'
-              << "mono_delta_db=" << report->stereo.mono_fold_down_delta_db << '\n'
-              << "clipped_samples=" << report->integrity.clipped_samples << '\n'
-              << "nan_samples=" << report->integrity.nan_samples << '\n'
-              << "infinite_samples=" << report->integrity.infinite_samples << '\n'
-              << "dc_offset=" << report->integrity.max_absolute_dc_offset << '\n'
-              << "waveform_levels=" << report->waveform.levels.size() << '\n';
+              << "Recommended: Master A\n"
+              << "Master A: " << rendered->master_a.output_path.string()
+              << " LUFS=" << rendered->master_a.analysis.loudness.integrated_lufs
+              << " dBTP=" << rendered->master_a.analysis.loudness.true_peak_dbtp << '\n'
+              << "Master B: " << rendered->master_b.output_path.string()
+              << " LUFS=" << rendered->master_b.analysis.loudness.integrated_lufs
+              << " dBTP=" << rendered->master_b.analysis.loudness.true_peak_dbtp << '\n'
+              << "Loudness-matched audition reference=" << rendered->audition.reference_lufs << " LUFS\n"
+              << "  Original audition gain=" << rendered->audition.original_gain_db << " dB\n"
+              << "  Master A audition gain=" << rendered->audition.master_a_gain_db << " dB\n"
+              << "  Master B audition gain=" << rendered->audition.master_b_gain_db << " dB\n";
     return 0;
   }
 
@@ -179,7 +253,6 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Preserve the Phase 0 bit-exact proof commands while production code migrates to ICodecService.
   amt::codec::SndFileRuntime legacy_runtime;
   if (command == "rerender" && argc == 4) {
     if (!legacy_runtime.lossless_rerender(argv[2], argv[3], error)) {

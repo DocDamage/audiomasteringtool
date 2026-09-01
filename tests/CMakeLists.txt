@@ -23,3 +23,12 @@ target_link_libraries(amt_phase2_tests PRIVATE
   amt_playback
 )
 add_test(NAME phase2_deterministic_mastering COMMAND amt_phase2_tests)
+
+add_executable(amt_phase3_tests phase3_tests.cpp)
+target_link_libraries(amt_phase3_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_codec
+  amt_analysis
+)
+add_test(NAME phase3_structural_perceptual_analysis COMMAND amt_phase3_tests)

@@ -164,7 +164,7 @@ void test_structural_and_perceptual() {
 }
 
 void test_character_detection() {
-  constexpr std::size_t frames = static_cast<std::size_t>(3 * kRate);
+  constexpr std::size_t frames = static_cast<std::size_t>(4 * kRate);
   amt::audio::AudioBuffer clipped(2U, frames);
   for (std::size_t frame = 0U; frame < frames; ++frame) {
     const double raw = 1.45 * std::sin(2.0 * std::numbers::pi * 80.0 *

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <system_error>
 
@@ -135,6 +136,15 @@ std::optional<SourceGuidedStereoRenderResult> render_source_guided_stereo(
     }
   }
 
+  auto partial = output;
+  partial += ".partial.wav";
+  auto backup = output;
+  backup += ".bak";
+  if (same_path(canonical_input, partial) || same_path(canonical_input, backup)) {
+    error = "source-guided stereo sidecar path collides with the canonical source";
+    return std::nullopt;
+  }
+
   auto decoder = codecs.open_decoder(canonical_input, error);
   if (!decoder) return std::nullopt;
   const auto metadata = decoder->metadata();
@@ -149,8 +159,6 @@ std::optional<SourceGuidedStereoRenderResult> render_source_guided_stereo(
     return std::nullopt;
   }
 
-  auto partial = output;
-  partial += ".partial.wav";
   remove_if_exists(partial);
 
   amt::codec::EncodeSettings settings;
@@ -183,6 +191,12 @@ std::optional<SourceGuidedStereoRenderResult> render_source_guided_stereo(
     if (block.channels() != static_cast<std::size_t>(metadata.channels) ||
         block.frames() != frames_read) {
       error = "canonical decoder returned an unexpected source-guided stereo block";
+      remove_if_exists(partial);
+      return std::nullopt;
+    }
+    if (frames_read > static_cast<std::size_t>(
+                          std::numeric_limits<std::int64_t>::max() - processed_frames)) {
+      error = "source-guided stereo render frame counter overflow";
       remove_if_exists(partial);
       return std::nullopt;
     }

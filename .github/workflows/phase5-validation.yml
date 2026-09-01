@@ -8,7 +8,18 @@ permissions:
 
 jobs:
   portable-phase5:
+    name: ${{ matrix.test }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - phase5_source_guided_separation_policy
+          - phase5_source_fingerprint_and_cache_identity
+          - phase5_complete_reconstruction_contract
+          - phase5_reconstruction_artifact_evaluator
+          - phase5_source_guided_processing_plan
+          - phase5_source_control_envelopes
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,23 +30,5 @@ jobs:
         run: cmake --preset ninja-debug
       - name: Build
         run: cmake --build --preset ninja-debug
-      - name: Phase 5 separation policy
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_separation_policy$' --output-on-failure
-      - name: Phase 5 fingerprint/cache identity
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_fingerprint_and_cache_identity$' --output-on-failure
-      - name: Phase 5 reconstruction contract
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_complete_reconstruction_contract$' --output-on-failure
-      - name: Phase 5 reconstruction artifact evaluator
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_reconstruction_artifact_evaluator$' --output-on-failure
-      - name: Phase 5 source-guided processing plan
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_guided_processing_plan$' --output-on-failure
-      - name: Phase 5 source-control envelopes
-        continue-on-error: true
-        run: ctest --preset ninja-debug -R '^phase5_source_control_envelopes$' --output-on-failure
-      - name: Enforce aggregate Phase 5 suite
-        run: ctest --preset ninja-debug -R '^phase5_' --output-on-failure
+      - name: Run ${{ matrix.test }}
+        run: ctest --preset ninja-debug -R '^${{ matrix.test }}$' --output-on-failure

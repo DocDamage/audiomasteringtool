@@ -192,4 +192,95 @@ MasteringPlan plan_mastering(const amt::analysis::Phase1AnalysisReport& report) 
   return {.master_a = std::move(a), .master_b = std::move(b)};
 }
 
+MasteringPlan plan_mastering(const amt::analysis::AnalysisReport& report) {
+  auto plan = plan_mastering(report.technical);
+  auto& a = plan.master_a;
+  auto& b = plan.master_b;
+
+  if (report.character.accidental_defect_risk >= 0.55) {
+    a.target_lufs = std::max(-12.0, a.target_lufs - 0.8);
+    b.target_lufs = std::max(-13.0, b.target_lufs - 0.5);
+    a.graph.set_bypass("a_saturation", true);
+    b.graph.set_bypass("b_light_saturation", true);
+    if (report.character.hard_clip_likelihood >= 0.72) {
+      a.graph.set_bypass("a_clipper", true);
+      a.rationale.push_back("Avoided additional clipping because the source already shows a high hard-clip defect risk.");
+    }
+    a.rationale.push_back("Backed off target loudness because Phase 3 found a meaningful accidental-clipping risk.");
+    b.rationale.push_back("Preservation alternative backs off further when source clipping looks accidental.");
+  } else if (report.character.intentional_character_likelihood >= 0.60) {
+    a.graph.set_bypass("a_saturation", true);
+    b.graph.set_bypass("b_light_saturation", true);
+    a.rationale.push_back("Preserved existing saturation/clipping character instead of layering more saturation on top.");
+  }
+
+  if (report.perceptual.harshness_score >= 0.58) {
+    double frequency = 3800.0;
+    double severity = report.perceptual.harshness_score;
+    for (const auto& resonance : report.perceptual.resonances) {
+      if (resonance.frequency_hz >= 2500.0 && resonance.frequency_hz <= 6500.0 &&
+          resonance.severity > severity * 0.55) {
+        frequency = resonance.frequency_hz;
+        severity = std::max(severity, resonance.severity);
+        break;
+      }
+    }
+    add(a.graph, "a_phase3_harshness_control",
+        DynamicEqParams{.frequency_hz = frequency, .q = 1.35, .threshold_db = -25.0,
+                        .ratio = 1.9, .attack_ms = 6.0, .release_ms = 85.0,
+                        .max_reduction_db = 1.2 + severity * 1.6});
+    a.rationale.push_back("Used Phase 3 time/persistence evidence to dynamically control upper-mid harshness near " +
+                          std::to_string(static_cast<int>(std::lround(frequency))) + " Hz.");
+    if (severity >= 0.82) {
+      add(b.graph, "b_phase3_harshness_safety",
+          DynamicEqParams{.frequency_hz = frequency, .q = 1.15, .threshold_db = -23.0,
+                          .ratio = 1.45, .attack_ms = 10.0, .release_ms = 110.0,
+                          .max_reduction_db = 0.9});
+    }
+  }
+
+  if (report.perceptual.sub_buildup_score >= 0.65 && !a.graph.contains("a_low_dynamic_eq")) {
+    add(a.graph, "a_phase3_sub_control",
+        DynamicEqParams{.frequency_hz = 62.0, .q = 0.9, .threshold_db = -20.0,
+                        .ratio = 2.0, .attack_ms = 22.0, .release_ms = 170.0,
+                        .max_reduction_db = 2.2});
+    a.rationale.push_back("Added narrow, event-reactive sub control because Phase 3 found persistent sub buildup.");
+  }
+
+  if (report.structural.macro_dynamics.section_contrast_db >= 8.0) {
+    a.target_lufs = std::max(-12.0, a.target_lufs - 0.4);
+    b.target_lufs = std::max(-13.0, b.target_lufs - 0.25);
+    a.rationale.push_back("Reduced loudness pressure slightly to preserve strong section-to-section arrangement contrast.");
+  }
+
+  if (report.technical.metadata.channels == 2 &&
+      (report.technical.stereo.correlation < 0.05 ||
+       report.technical.stereo.negative_correlation_window_fraction > 0.18)) {
+    add(a.graph, "a_phase3_phase_safety", StereoParams{.width = 0.92, .bass_mono_hz = 120.0});
+    add(b.graph, "b_phase3_phase_safety", StereoParams{.width = 0.96, .bass_mono_hz = 110.0});
+    a.rationale.push_back("Reduced stereo risk because Phase 3 found recurring negative-correlation behavior.");
+  }
+
+  if ((report.technical.loudness.crest_factor_db < 6.5 ||
+       report.technical.loudness.peak_to_loudness_ratio_db < 6.0) &&
+      !a.graph.contains("a_transient_restore")) {
+    add(a.graph, "a_phase3_transient_restore",
+        TransientParams{.attack_db = 0.9, .sustain_db = -0.1,
+                        .fast_ms = 3.0, .slow_ms = 34.0, .mix = 0.60});
+    a.rationale.push_back("Restored a small amount of attack because Phase 3 found already-flattened transient contrast.");
+  }
+
+  if (report.mix_health.overall_heuristic_score >= 86.0 &&
+      report.character.accidental_defect_risk < 0.25) {
+    a.target_lufs = std::min(a.target_lufs, -9.8);
+    a.graph.set_bypass("a_multiband_control", true);
+    a.graph.set_bypass("a_saturation", true);
+    a.rationale.push_back("The source already scores strongly across deterministic Mix Health dimensions, so broad processing was reduced.");
+  }
+
+  a.target_lufs = std::clamp(a.target_lufs, -12.0, -8.5);
+  b.target_lufs = std::clamp(b.target_lufs, -13.0, -9.5);
+  return plan;
+}
+
 }  // namespace amt::mastering

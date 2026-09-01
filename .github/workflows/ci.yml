@@ -24,8 +24,10 @@ jobs:
         run: cmake --build --preset windows-debug
       - name: Build Release
         run: cmake --build --preset windows-release
-      - name: Unit and conformance tests
+      - name: Unit and conformance tests (Debug)
         run: ctest --preset windows-debug
+      - name: Unit and conformance tests (Release)
+        run: ctest --preset windows-release
       - name: Worker health
         run: build/windows-msvc/src/worker/Debug/amt_worker.exe --health
       - name: Worker IPC

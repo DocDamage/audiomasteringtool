@@ -33,6 +33,7 @@
   ],
   "testPresets": [
     {"name": "windows-debug", "configurePreset": "windows-msvc", "configuration": "Debug", "output": {"outputOnFailure": true}},
+    {"name": "windows-release", "configurePreset": "windows-msvc", "configuration": "Release", "output": {"outputOnFailure": true}},
     {"name": "ninja-debug", "configurePreset": "ninja-debug", "output": {"outputOnFailure": true}}
   ]
 }

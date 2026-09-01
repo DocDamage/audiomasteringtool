@@ -12,20 +12,7 @@ permissions:
 
 jobs:
   portable-phase5:
-    name: ${{ matrix.test }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        test:
-          - phase5_source_guided_separation_policy
-          - phase5_source_fingerprint_and_cache_identity
-          - phase5_complete_reconstruction_contract
-          - phase5_reconstruction_artifact_evaluator
-          - phase5_source_guided_processing_plan
-          - phase5_source_control_envelopes
-          - phase5_source_guided_stereo_executor
-          - phase5_source_guided_stereo_renderer
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,5 +23,29 @@ jobs:
         run: cmake --preset ninja-debug
       - name: Build
         run: cmake --build --preset ninja-debug
-      - name: Run ${{ matrix.test }}
-        run: ctest --preset ninja-debug -R '^${{ matrix.test }}$' --output-on-failure
+      - name: Separation policy
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_separation_policy$' --output-on-failure
+      - name: Fingerprint/cache identity
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_fingerprint_and_cache_identity$' --output-on-failure
+      - name: Complete reconstruction contract
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_complete_reconstruction_contract$' --output-on-failure
+      - name: Reconstruction artifact evaluator
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_reconstruction_artifact_evaluator$' --output-on-failure
+      - name: Source-guided processing plan
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_processing_plan$' --output-on-failure
+      - name: Source-control envelopes
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_control_envelopes$' --output-on-failure
+      - name: Source-guided stereo executor
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_executor$' --output-on-failure
+      - name: Source-guided stereo renderer
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_stereo_renderer$' --output-on-failure
+      - name: Enforce aggregate Phase 5 suite
+        run: ctest --preset ninja-debug -R '^phase5_' --output-on-failure

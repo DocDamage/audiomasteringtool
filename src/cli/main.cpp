@@ -15,13 +15,14 @@
 #include "amt/mastering/Audition.h"
 #include "amt/mastering/OfflineRenderer.h"
 #include "amt/mastering/Planner.h"
+#include "amt/mastering/SourceGuidedCalibration.h"
 #include "amt/playback/ComparisonTransport.h"
 #include "amt/playback/Transport.h"
 
 namespace {
 
 void usage() {
-  std::cout << "AudioMasteringTool Phase 3 CLI\n"
+  std::cout << "AudioMasteringTool Phase 5 CLI\n"
             << "  amt_cli --version\n"
             << "  amt_cli codec-status\n"
             << "  amt_cli probe <input>\n"
@@ -29,6 +30,9 @@ void usage() {
             << "  amt_cli deep-analyze <input> [--json]\n"
             << "  amt_cli plan <input>\n"
             << "  amt_cli master <input> <output-directory> [--bits 16|24|32|float]\n"
+            << "  amt_cli calibrate-source-guidance <input> <output-directory>"
+               " --registry <registry.json> --worker <amt_worker> --model-root <dir>"
+               " [--bits 16|24|32|float]\n"
             << "  amt_cli audition <original> <master-a> <master-b>\n"
             << "  amt_cli export <input> <output> [--sample-rate N] [--bits 16|24|32|float]\n"
             << "  amt_cli compare <first> <second> [--tolerance value]\n"
@@ -274,6 +278,75 @@ int main(int argc, char** argv) {
               << "  Original audition gain=" << rendered->audition.original_gain_db << " dB\n"
               << "  Master A audition gain=" << rendered->audition.master_a_gain_db << " dB\n"
               << "  Master B audition gain=" << rendered->audition.master_b_gain_db << " dB\n";
+    return 0;
+  }
+
+  if (command == "calibrate-source-guidance" && argc >= 10) {
+    amt::mastering::SourceGuidedCalibrationRequest request;
+    request.source_path = argv[2];
+    request.output_directory = argv[3];
+
+    for (int index = 4; index < argc; ++index) {
+      const std::string option = argv[index];
+      if (option == "--registry" && index + 1 < argc) {
+        request.registry_path = argv[++index];
+      } else if (option == "--worker" && index + 1 < argc) {
+        request.worker_executable = argv[++index];
+      } else if (option == "--model-root" && index + 1 < argc) {
+        request.model_store_root = argv[++index];
+      } else if (option == "--bits" && index + 1 < argc) {
+        const auto format = parse_bits(argv[++index]);
+        if (!format) {
+          std::cerr << "invalid --bits value\n";
+          return 2;
+        }
+        request.render_settings.sample_format = *format;
+      } else {
+        std::cerr << "unknown calibration option: " << option << '\n';
+        return 2;
+      }
+    }
+
+    if (request.registry_path.empty() || request.worker_executable.empty() ||
+        request.model_store_root.empty()) {
+      std::cerr << "calibration requires --registry, --worker, and --model-root\n";
+      return 2;
+    }
+
+    std::cout << "Generating stereo/source-guided calibration candidates...\n";
+    const auto result = amt::mastering::render_source_guided_calibration_pair(
+        codecs, request, error, nullptr,
+        [](const double value) {
+          const int percent = static_cast<int>(std::lround(
+              std::clamp(value, 0.0, 1.0) * 100.0));
+          std::cout << "\rCalibration " << std::setw(3) << percent << "%" << std::flush;
+        });
+    std::cout << '\n';
+    if (!result) {
+      std::cerr << "calibration render failed: " << error << '\n';
+      return 1;
+    }
+
+    std::cout << "Evidence mode: "
+              << amt::separation::separation_mode_name(result->evidence_mode) << '\n'
+              << "Source estimates analyzed: "
+              << (result->source_estimates_analyzed ? "yes" : "no") << '\n'
+              << "Stereo Master A: " << result->stereo_master_a.string() << '\n'
+              << "Guided candidate rendered: "
+              << (result->guided_candidate_rendered ? "yes" : "no") << '\n';
+    if (result->guided_candidate_rendered) {
+      std::cout << "Guided Master A: " << result->guided_master_a.string() << '\n';
+    }
+    std::cout << "Calibration manifest: " << result->manifest_path.string() << '\n';
+    for (const auto& issue : result->issues) {
+      std::cout << "  source issue: " << amt::separation::stem_role_name(issue.source)
+                << ' ' << amt::separation::source_guided_issue_name(issue.type)
+                << " severity=" << issue.severity
+                << " confidence=" << issue.confidence << '\n';
+    }
+    for (const auto& warning : result->warnings) {
+      std::cout << "  warning: " << warning << '\n';
+    }
     return 0;
   }
 

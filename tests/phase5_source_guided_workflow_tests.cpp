@@ -104,6 +104,15 @@ amt::separation::SourceGuidedWorkflowConfig workflow_config() {
   return config;
 }
 
+bool workflow_has_issue(const amt::separation::SourceGuidedWorkflowResult& result,
+                        const amt::separation::StemRole source,
+                        const amt::separation::SourceGuidedIssueType type) {
+  return std::any_of(result.issues.begin(), result.issues.end(),
+                     [&](const auto& issue) {
+                       return issue.source == source && issue.type == type;
+                     });
+}
+
 void test_diagnostic_separation_requires_post_separation_evidence_for_mode1() {
   const auto root = test_root("workflow-mode1");
   auto state = std::make_shared<MemoryCodecState>();
@@ -128,13 +137,8 @@ void test_diagnostic_separation_requires_post_separation_evidence_for_mode1() {
   assert(provider.calls_ == 1);
   assert(result->source_estimates_analyzed);
   assert(result->evidence.source_specific_issue);
-  assert(has_issue(*reinterpret_cast<const amt::separation::SourceIssueInferenceResult*>(
-                       &amt::separation::SourceIssueInferenceResult{
-                           .issues = result->issues,
-                           .evidence = result->evidence,
-                           .measurement_confidence = result->measurement_confidence}),
-                   amt::separation::StemRole::tonal,
-                   amt::separation::SourceGuidedIssueType::harshness));
+  assert(workflow_has_issue(*result, amt::separation::StemRole::tonal,
+                            amt::separation::SourceGuidedIssueType::harshness));
   assert(result->guidance.decision.mode ==
          amt::separation::SeparationMode::source_guided_stereo);
   assert(!result->evidence.reconstruction_required_for_full_repair);

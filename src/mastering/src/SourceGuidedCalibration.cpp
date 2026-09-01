@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "amt/analysis/FileAnalyzer.h"
+#include "amt/audio/AudioBuffer.h"
 #include "amt/mastering/Planner.h"
 #include "amt/mastering/SourceGuidedMastering.h"
 #include "amt/separation/ModelArtifactInstaller.h"
@@ -20,6 +21,8 @@
 
 namespace amt::mastering {
 namespace {
+
+constexpr std::size_t kAuditionReadFrames = 8192U;
 
 [[nodiscard]] bool cancelled(
     const amt::core::CancellationToken* cancellation) noexcept {
@@ -71,6 +74,97 @@ namespace {
   return request.model_store_root / relative;
 }
 
+bool render_attenuated_audition_copy(
+    amt::codec::ICodecService& codecs,
+    const std::filesystem::path& input,
+    const std::filesystem::path& output,
+    const double gain_db,
+    std::string& error,
+    const amt::core::CancellationToken* cancellation) {
+  if (!std::isfinite(gain_db) || gain_db > 1.0e-9) {
+    error = "calibration audition gain must be finite attenuation only";
+    return false;
+  }
+
+  auto decoder = codecs.open_decoder(input, error);
+  if (!decoder) return false;
+  const auto metadata = decoder->metadata();
+  if (metadata.sample_rate <= 0 || metadata.channels <= 0) {
+    error = "calibration audition source has invalid audio metadata";
+    return false;
+  }
+
+  std::error_code directory_error;
+  std::filesystem::create_directories(output.parent_path(), directory_error);
+  if (directory_error) {
+    error = "unable to create calibration audition directory: " +
+            directory_error.message();
+    return false;
+  }
+
+  amt::codec::EncodeSettings settings;
+  settings.sample_rate = metadata.sample_rate;
+  settings.channels = metadata.channels;
+  settings.container = amt::codec::AudioContainer::wav;
+  settings.sample_format = amt::codec::AudioSampleFormat::float32;
+  auto encoder = codecs.open_encoder(output, settings, error);
+  if (!encoder) return false;
+
+  const float gain = static_cast<float>(std::pow(10.0, gain_db / 20.0));
+  while (true) {
+    if (cancelled(cancellation)) {
+      error = "source-guided calibration cancelled";
+      return false;
+    }
+    amt::audio::AudioBuffer block;
+    std::size_t frames_read = 0U;
+    if (!decoder->read(block, kAuditionReadFrames, frames_read, error, cancellation)) {
+      return false;
+    }
+    if (frames_read == 0U) break;
+    for (std::size_t channel = 0U; channel < block.channels(); ++channel) {
+      auto samples = block.channel(channel);
+      for (auto& sample : samples) sample *= gain;
+    }
+    if (!encoder->write(block, error, cancellation)) return false;
+  }
+  return encoder->finalize(error);
+}
+
+bool make_level_matched_auditions(
+    amt::codec::ICodecService& codecs,
+    const MasteringRenderPair& stereo,
+    const SourceGuidedMasteringRenderPair& guided,
+    SourceGuidedCalibrationResult& result,
+    const std::filesystem::path& output_directory,
+    std::string& error,
+    const amt::core::CancellationToken* cancellation) {
+  const double stereo_lufs = stereo.master_a.analysis.loudness.integrated_lufs;
+  const double guided_lufs = guided.masters.master_a.analysis.loudness.integrated_lufs;
+  if (!std::isfinite(stereo_lufs) || !std::isfinite(guided_lufs)) {
+    error = "calibration candidates have invalid loudness measurements";
+    return false;
+  }
+
+  result.audition_reference_lufs = std::min(stereo_lufs, guided_lufs);
+  result.stereo_audition_gain_db = result.audition_reference_lufs - stereo_lufs;
+  result.guided_audition_gain_db = result.audition_reference_lufs - guided_lufs;
+  result.stereo_blind_audition = output_directory / "blind" / "stereo.wav";
+  result.guided_blind_audition = output_directory / "blind" / "guided.wav";
+
+  if (!render_attenuated_audition_copy(
+          codecs, stereo.master_a.output_path, result.stereo_blind_audition,
+          result.stereo_audition_gain_db, error, cancellation)) {
+    return false;
+  }
+  if (!render_attenuated_audition_copy(
+          codecs, guided.masters.master_a.output_path, result.guided_blind_audition,
+          result.guided_audition_gain_db, error, cancellation)) {
+    return false;
+  }
+  return true;
+}
+
 bool write_manifest(const SourceGuidedCalibrationRequest& request,
                     const SourceGuidedCalibrationResult& result,
                     const SourceGuidedMasteringRenderPair* guided,
@@ -102,11 +196,23 @@ bool write_manifest(const SourceGuidedCalibrationRequest& request,
            << guided->masters.master_a.analysis.loudness.integrated_lufs << ",\n"
            << "  \"guidedMasterATruePeakDbtp\": "
            << guided->masters.master_a.analysis.loudness.true_peak_dbtp << ",\n"
-           << "  \"guidedAppliedBindings\": " << guided->applied_bindings << ",\n";
+           << "  \"guidedAppliedBindings\": " << guided->applied_bindings << ",\n"
+           << "  \"auditionReferenceLufs\": " << result.audition_reference_lufs << ",\n"
+           << "  \"stereoAuditionGainDb\": " << result.stereo_audition_gain_db << ",\n"
+           << "  \"guidedAuditionGainDb\": " << result.guided_audition_gain_db << ",\n"
+           << "  \"stereoBlindAudition\": \""
+           << json_escape(path_utf8(result.stereo_blind_audition)) << "\",\n"
+           << "  \"guidedBlindAudition\": \""
+           << json_escape(path_utf8(result.guided_blind_audition)) << "\",\n";
   } else {
     output << "  \"guidedMasterALufs\": null,\n"
            << "  \"guidedMasterATruePeakDbtp\": null,\n"
-           << "  \"guidedAppliedBindings\": 0,\n";
+           << "  \"guidedAppliedBindings\": 0,\n"
+           << "  \"auditionReferenceLufs\": null,\n"
+           << "  \"stereoAuditionGainDb\": null,\n"
+           << "  \"guidedAuditionGainDb\": null,\n"
+           << "  \"stereoBlindAudition\": \"\",\n"
+           << "  \"guidedBlindAudition\": \"\",\n";
   }
 
   output << "  \"issues\": [\n";
@@ -260,12 +366,18 @@ render_source_guided_calibration_pair(
         *source_analysis, base_plan, workflow->guidance, workflow->issues, error,
         {}, request.render_settings, cancellation,
         [&](const double value) {
-          amt::core::report_progress(progress, 0.78 + value * 0.21);
+          amt::core::report_progress(progress, 0.78 + value * 0.18);
         });
     if (!guided) return std::nullopt;
     if (guided->source_guidance_applied) {
       result.guided_candidate_rendered = true;
       result.guided_master_a = guided->masters.master_a.output_path;
+      if (!make_level_matched_auditions(
+              codecs, *stereo, *guided, result, request.output_directory,
+              error, cancellation)) {
+        return std::nullopt;
+      }
+      amt::core::report_progress(progress, 0.99);
     } else {
       result.warnings.emplace_back(
           "evidence selected Mode 1, but the calibration render safely fell back to stereo");

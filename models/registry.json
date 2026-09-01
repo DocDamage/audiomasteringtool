@@ -29,7 +29,7 @@
         "inputTensor": "mix",
         "outputTensor": "stems",
         "chunkFrames": 343980,
-        "overlapFrames": 11025,
+        "overlapFrames": 85995,
         "calibratedOutputConfidence": 0.70,
         "completeReconstruction": false
       }

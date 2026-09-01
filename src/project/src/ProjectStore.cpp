@@ -666,6 +666,20 @@ bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
 
   const auto previous_updated_ms = project.updated_ms;
   const auto previous_revision_count = project.revisions.size();
+  const auto previous_selected = project.selected;
+  const auto previous_master_a = project.master_a;
+  const auto previous_master_b = project.master_b;
+  const auto previous_master_a_graph_json = project.master_a_graph_json;
+  const auto previous_master_b_graph_json = project.master_b_graph_json;
+
+  if (kind == "analysis") {
+    project.selected = CandidateSelection::original;
+    project.master_a = {};
+    project.master_b = {};
+    project.master_a_graph_json.clear();
+    project.master_b_graph_json.clear();
+  }
+
   const std::string parent = project.revisions.empty() ? std::string{} : project.revisions.back().id;
   project.updated_ms = now_ms();
   project.revisions.push_back({.id = make_id(project.source_path),
@@ -678,6 +692,11 @@ bool ProjectStore::append_revision(ProjectRecord& project, std::string kind,
 
   project.updated_ms = previous_updated_ms;
   project.revisions.resize(previous_revision_count);
+  project.selected = previous_selected;
+  project.master_a = previous_master_a;
+  project.master_b = previous_master_b;
+  project.master_a_graph_json = previous_master_a_graph_json;
+  project.master_b_graph_json = previous_master_b_graph_json;
   return false;
 }
 

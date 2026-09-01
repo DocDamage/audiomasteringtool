@@ -10,7 +10,9 @@
       "cacheVariables": {
         "AMT_BUILD_TESTS": "ON",
         "AMT_BUILD_BENCHMARKS": "ON",
-        "AMT_WITH_ONNX": "OFF"
+        "AMT_WITH_ONNX": "ON",
+        "AMT_AUTO_FETCH_ONNX_RUNTIME": "ON",
+        "AMT_ORT_ENABLE_CUDA": "OFF"
       }
     },
     {
@@ -22,7 +24,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "AMT_BUILD_TESTS": "ON",
         "AMT_BUILD_BENCHMARKS": "ON",
-        "AMT_WITH_ONNX": "OFF"
+        "AMT_WITH_ONNX": "OFF",
+        "AMT_AUTO_FETCH_ONNX_RUNTIME": "OFF"
       }
     }
   ],

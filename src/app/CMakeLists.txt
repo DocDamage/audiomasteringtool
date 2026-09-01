@@ -1,4 +1,4 @@
-add_executable(audiomasteringtool WIN32 main.cpp)
+add_executable(audiomasteringtool WIN32 Phase4Main.cpp)
 target_link_libraries(audiomasteringtool PRIVATE amt_core)
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(audiomasteringtool)
@@ -9,6 +9,7 @@ if(WIN32)
     amt_analysis
     amt_mastering
     amt_playback
+    amt_project
     comctl32
     comdlg32
     shell32

@@ -18,6 +18,10 @@ bool is_integer_format(const AudioSampleFormat format) {
   return integer_bit_depth(format) > 0;
 }
 
+bool is_floating_format(const AudioSampleFormat format) noexcept {
+  return format == AudioSampleFormat::float32 || format == AudioSampleFormat::float64;
+}
+
 class TpdfDither {
  public:
   explicit TpdfDither(const int target_bits)
@@ -117,8 +121,11 @@ bool export_audio(ICodecService& codecs, const std::filesystem::path& input,
 
   const int source_bits = integer_bit_depth(source.sample_format);
   const int target_bits = integer_bit_depth(settings.sample_format);
+  const bool quantizes_from_float = is_floating_format(source.sample_format) && target_bits > 0;
+  const bool reduces_integer_depth = source_bits > 0 && target_bits > 0 && source_bits > target_bits;
   const bool should_dither = request.dither_when_reducing_integer_depth &&
-                             is_integer_format(settings.sample_format) && source_bits > target_bits;
+                             is_integer_format(settings.sample_format) &&
+                             (quantizes_from_float || reduces_integer_depth);
   TpdfDither dither(should_dither ? target_bits : 0);
 
   std::int64_t consumed = 0;

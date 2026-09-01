@@ -34,6 +34,8 @@ void test_project_round_trip() {
 
   project.source_integrated_lufs = -14.25;
   project.analysis_json = R"({"schema_version":2,"test":"analysis"})";
+  assert(store.append_revision(project, "analysis", "Deep analysis stored.", {}, error));
+
   project.master_a_graph_json = R"({"schema_version":1,"nodes":[{"id":"a"}]})";
   project.master_b_graph_json = R"({"schema_version":1,"nodes":[{"id":"b"}]})";
   project.master_a = {.available = true,
@@ -47,8 +49,6 @@ void test_project_round_trip() {
                       .true_peak_dbtp = -1.05,
                       .recommended = false};
   project.selected = amt::project::CandidateSelection::master_b;
-
-  assert(store.append_revision(project, "analysis", "Deep analysis stored.", {}, error));
   assert(store.append_revision(project, "mastering", "Master A and B rendered.",
                                project.master_a.path, error));
   assert(store.append_revision(project, "selection", "Master B selected.",
@@ -121,6 +121,73 @@ void test_project_round_trip() {
          R"({"schema_version":1,"nodes":[{"id":"a"}]})");
   assert(read_text_file(immutable_master_b_graph) ==
          R"({"schema_version":1,"nodes":[{"id":"b"}]})");
+
+  std::filesystem::remove_all(root, ignored);
+}
+
+void test_reanalysis_invalidates_only_current_candidates() {
+  const auto root = std::filesystem::temp_directory_path() / "amt-phase4-reanalysis-tests";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+
+  amt::project::ProjectStore store(root);
+  std::string error;
+  auto project = store.create(root / "reanalyze.wav", error);
+  assert(error.empty());
+
+  project.analysis_json = R"({"schema_version":2,"pass":1})";
+  assert(store.append_revision(project, "analysis", "Initial analysis.", {}, error));
+
+  project.master_a_graph_json = R"({"schema_version":1,"nodes":[{"id":"first-a"}]})";
+  project.master_b_graph_json = R"({"schema_version":1,"nodes":[{"id":"first-b"}]})";
+  project.master_a = {.available = true,
+                      .path = root / "reanalyze_Master_A.wav",
+                      .integrated_lufs = -9.2,
+                      .true_peak_dbtp = -1.0,
+                      .recommended = true};
+  project.master_b = {.available = true,
+                      .path = root / "reanalyze_Master_B.wav",
+                      .integrated_lufs = -11.1,
+                      .true_peak_dbtp = -1.0,
+                      .recommended = false};
+  project.selected = amt::project::CandidateSelection::master_a;
+  assert(store.append_revision(project, "mastering", "Initial masters.",
+                               project.master_a.path, error));
+  const auto mastering_revision = project.revisions.back();
+  const auto project_directory = root / project.project_id;
+  const auto mastering_directory = project_directory / "revisions" / mastering_revision.id;
+  const auto old_a_graph = read_text_file(mastering_directory / "master-a-graph.json");
+  const auto old_b_graph = read_text_file(mastering_directory / "master-b-graph.json");
+  const auto old_candidates = read_text_file(mastering_directory / "candidates.amt");
+  assert(!old_a_graph.empty());
+  assert(!old_b_graph.empty());
+  assert(old_candidates.find("master_a_available=1") != std::string::npos);
+
+  project.analysis_json = R"({"schema_version":2,"pass":2})";
+  assert(store.append_revision(project, "analysis", "Analysis refreshed.", {}, error));
+  assert(project.selected == amt::project::CandidateSelection::original);
+  assert(!project.master_a.available);
+  assert(!project.master_b.available);
+  assert(project.master_a.path.empty());
+  assert(project.master_b.path.empty());
+  assert(project.master_a_graph_json.empty());
+  assert(project.master_b_graph_json.empty());
+  assert(project.revisions.back().kind == "analysis");
+  assert(project.revisions.back().parent_id == mastering_revision.id);
+
+  const auto loaded = store.load(project.project_id, error);
+  assert(loaded.has_value());
+  assert(loaded->selected == amt::project::CandidateSelection::original);
+  assert(!loaded->master_a.available);
+  assert(!loaded->master_b.available);
+  assert(loaded->master_a_graph_json.empty());
+  assert(loaded->master_b_graph_json.empty());
+  assert(!std::filesystem::exists(project_directory / "master-a-graph.json"));
+  assert(!std::filesystem::exists(project_directory / "master-b-graph.json"));
+
+  assert(read_text_file(mastering_directory / "master-a-graph.json") == old_a_graph);
+  assert(read_text_file(mastering_directory / "master-b-graph.json") == old_b_graph);
+  assert(read_text_file(mastering_directory / "candidates.amt") == old_candidates);
 
   std::filesystem::remove_all(root, ignored);
 }
@@ -253,6 +320,7 @@ void test_export_recipes() {
 
 int main() {
   test_project_round_trip();
+  test_reanalysis_invalidates_only_current_candidates();
   test_selection_history_and_stale_snapshot_merge();
   test_revision_id_uniqueness();
   test_export_recipes();

@@ -100,3 +100,10 @@ target_link_libraries(amt_phase5_source_guided_executor_tests PRIVATE
   amt_separation
 )
 add_test(NAME phase5_source_guided_stereo_executor COMMAND amt_phase5_source_guided_executor_tests)
+
+add_executable(amt_phase5_source_guided_renderer_tests phase5_source_guided_renderer_tests.cpp)
+target_link_libraries(amt_phase5_source_guided_renderer_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_source_guided_stereo_renderer COMMAND amt_phase5_source_guided_renderer_tests)

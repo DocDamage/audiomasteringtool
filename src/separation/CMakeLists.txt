@@ -4,6 +4,8 @@ add_library(amt_separation STATIC
   src/ReconstructionArtifactEvaluator.cpp
   src/SourceGuidedProcessing.cpp
   src/SourceControlEnvelope.cpp
+  src/SourceGuidedStereoExecutor.cpp
+  src/SourceGuidedStereoRenderer.cpp
 )
 
 target_include_directories(amt_separation PUBLIC include)

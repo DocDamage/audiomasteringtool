@@ -230,8 +230,17 @@ int run_separate_onnx(const std::vector<std::string>& args) {
     request.overlap_frames = *parsed;
   }
 
+  int last_progress = -1;
   std::string error;
-  const auto result = amt::worker::run_onnx_separation(request, error);
+  const auto result = amt::worker::run_onnx_separation(
+      request, error, [&last_progress](const double value) {
+        int progress = static_cast<int>(value * 100.0 + 0.5);
+        if (progress < 0) progress = 0;
+        if (progress > 100) progress = 100;
+        if (progress == last_progress) return;
+        last_progress = progress;
+        std::cout << "{\"progress\":" << progress << "}\n" << std::flush;
+      });
   if (!result) {
     std::cout << "{\"ok\":false,\"error\":\"" << json_escape(error)
               << "\"}\n";

@@ -208,23 +208,32 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
   unknown_artifacts.confidence = 0.0;
   unknown_artifacts.evidence = {"reconstruction has not been evaluated"};
 
+  const bool diagnostic_separation =
+      config.allow_diagnostic_separation && !request.evidence.source_specific_issue;
   const double minimum_benefit = clamp01(config.policy.minimum_expected_benefit);
   const double guidance_confidence = clamp01(request.evidence.source_guidance_confidence);
   const bool guidance_cannot_qualify =
       !request.evidence.reconstruction_required_for_full_repair &&
       guidance_confidence < clamp01(config.policy.minimum_guidance_confidence);
-  if (!request.evidence.source_specific_issue ||
-      clamp01(request.evidence.expected_repair_benefit) < minimum_benefit ||
-      guidance_cannot_qualify) {
+  if (!diagnostic_separation &&
+      (!request.evidence.source_specific_issue ||
+       clamp01(request.evidence.expected_repair_benefit) < minimum_benefit ||
+       guidance_cannot_qualify)) {
     output.decision = choose_separation_mode(request.evidence, unknown_artifacts, config.policy);
     amt::core::report_progress(progress, 1.0);
     return output;
   }
 
   if (!provider_.available()) {
-    output.decision = stereo_fallback(request.evidence,
-                                      "source-separation provider is unavailable; preserving the original stereo mix");
-    output.warnings.emplace_back("source-specific processing was requested but no separation provider is available");
+    output.decision = stereo_fallback(
+        request.evidence,
+        diagnostic_separation
+            ? "source-estimate diagnostics are unavailable; preserving the original stereo mix"
+            : "source-separation provider is unavailable; preserving the original stereo mix");
+    output.warnings.emplace_back(
+        diagnostic_separation
+            ? "source-estimate diagnostics were requested but no separation provider is available"
+            : "source-specific processing was requested but no separation provider is available");
     amt::core::report_progress(progress, 1.0);
     return output;
   }
@@ -374,6 +383,11 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
       std::min(clamp01(request.evidence.source_guidance_confidence),
                effective_evidence.model_confidence);
   output.decision = choose_separation_mode(effective_evidence, artifact_for_policy, config.policy);
+
+  if (diagnostic_separation) {
+    output.decision.reasons.emplace_back(
+        "diagnostic separation completed; source intervention remains disabled until the returned estimates provide source-specific evidence");
+  }
 
   if (output.decision.mode == SeparationMode::stem_reconstruction &&
       !has_complete_reconstruction(*output.separation)) {

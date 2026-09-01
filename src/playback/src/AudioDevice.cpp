@@ -68,7 +68,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
       handle_ = handle;
     }
     running_.store(true, std::memory_order_release);
-    paused_.store(false, std::memory_order_release);
     worker_ = std::thread([this] { worker_loop(); });
     return true;
   }
@@ -84,7 +83,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
       error = "waveOutPause failed with code " + std::to_string(result);
       return false;
     }
-    paused_.store(true, std::memory_order_release);
     return true;
   }
 
@@ -99,7 +97,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
       error = "waveOutRestart failed with code " + std::to_string(result);
       return false;
     }
-    paused_.store(false, std::memory_order_release);
     return true;
   }
 
@@ -132,7 +129,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
     const std::size_t rendered = callback_(block, config_.frames_per_buffer);
     if (rendered == 0U) return false;
     const std::size_t frames = std::min(rendered, config_.frames_per_buffer);
-    slot.samples.assign(frames * config_.channels, 0);
     for (std::size_t frame = 0; frame < frames; ++frame) {
       for (std::size_t channel = 0; channel < config_.channels; ++channel) {
         const float source = block.channel(channel)[frame];
@@ -141,8 +137,8 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
             std::lrint(clipped * (clipped >= 0.0F ? 32767.0F : 32768.0F)));
       }
     }
-    slot.header.lpData = reinterpret_cast<LPSTR>(slot.samples.data());
-    slot.header.dwBufferLength = static_cast<DWORD>(slot.samples.size() * sizeof(std::int16_t));
+    slot.header.dwBufferLength = static_cast<DWORD>(
+        frames * config_.channels * sizeof(std::int16_t));
     return true;
   }
 
@@ -160,6 +156,11 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
 
   void worker_loop() {
     std::vector<BufferSlot> slots(config_.queued_buffers);
+    for (auto& slot : slots) {
+      slot.samples.resize(config_.frames_per_buffer * config_.channels);
+      slot.header.lpData = reinterpret_cast<LPSTR>(slot.samples.data());
+    }
+
     std::size_t active = 0U;
     bool source_finished = false;
     for (auto& slot : slots) {
@@ -208,7 +209,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
       }
     }
     running_.store(false, std::memory_order_release);
-    paused_.store(false, std::memory_order_release);
   }
 
   void cleanup_handle() noexcept {
@@ -223,7 +223,6 @@ class WaveOutAudioDevice final : public IAudioOutputDevice {
   AudioOutputConfig config_;
   AudioRenderCallback callback_;
   std::atomic_bool running_{false};
-  std::atomic_bool paused_{false};
   mutable std::mutex handle_mutex_;
   HWAVEOUT handle_{nullptr};
   std::thread worker_;

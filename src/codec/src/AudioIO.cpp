@@ -56,6 +56,25 @@ AudioContainer container_from_extension(const std::filesystem::path& path) {
   return AudioContainer::unknown;
 }
 
+ChannelLayout channel_layout_from_count(const int channels) noexcept {
+  switch (channels) {
+    case 1:
+      return ChannelLayout::mono;
+    case 2:
+      return ChannelLayout::stereo;
+    case 3:
+      return ChannelLayout::three_zero;
+    case 4:
+      return ChannelLayout::quad;
+    case 5:
+      return ChannelLayout::five_zero;
+    case 6:
+      return ChannelLayout::five_one;
+    default:
+      return ChannelLayout::unknown;
+  }
+}
+
 int integer_bit_depth(const AudioSampleFormat format) noexcept {
   switch (format) {
     case AudioSampleFormat::pcm16:
@@ -132,6 +151,63 @@ bool export_audio(ICodecService& codecs, const std::filesystem::path& input,
 
   if (!encoder->finalize(error)) return false;
   amt::core::report_progress(progress, 1.0);
+  return true;
+}
+
+bool verify_audio_equal(ICodecService& codecs, const std::filesystem::path& first,
+                        const std::filesystem::path& second, const double tolerance,
+                        std::string& error, const amt::core::CancellationToken* cancellation) {
+  if (tolerance < 0.0) {
+    error = "comparison tolerance cannot be negative";
+    return false;
+  }
+  auto a = codecs.open_decoder(first, error);
+  if (!a) return false;
+  auto b = codecs.open_decoder(second, error);
+  if (!b) return false;
+  const auto& a_info = a->metadata();
+  const auto& b_info = b->metadata();
+  if (a_info.sample_rate != b_info.sample_rate || a_info.channels != b_info.channels ||
+      a_info.frames != b_info.frames) {
+    error = "decoded audio geometry mismatch";
+    return false;
+  }
+
+  std::int64_t compared = 0;
+  while (true) {
+    if (cancellation != nullptr && cancellation->is_cancelled()) {
+      error = "audio comparison cancelled";
+      return false;
+    }
+    amt::audio::AudioBuffer a_buffer;
+    amt::audio::AudioBuffer b_buffer;
+    std::size_t a_frames = 0U;
+    std::size_t b_frames = 0U;
+    if (!a->read(a_buffer, kStreamingFrames, a_frames, error, cancellation) ||
+        !b->read(b_buffer, kStreamingFrames, b_frames, error, cancellation)) {
+      return false;
+    }
+    if (a_frames != b_frames) {
+      error = "decoded frame-count mismatch near frame " + std::to_string(compared);
+      return false;
+    }
+    if (a_frames == 0U) break;
+    for (std::size_t channel = 0; channel < a_buffer.channels(); ++channel) {
+      const auto a_channel = a_buffer.channel(channel);
+      const auto b_channel = b_buffer.channel(channel);
+      for (std::size_t frame = 0; frame < a_frames; ++frame) {
+        const float av = a_channel[frame];
+        const float bv = b_channel[frame];
+        if (!std::isfinite(av) || !std::isfinite(bv) ||
+            std::abs(static_cast<double>(av) - static_cast<double>(bv)) > tolerance) {
+          error = "decoded sample mismatch near frame " +
+                  std::to_string(compared + static_cast<std::int64_t>(frame));
+          return false;
+        }
+      }
+    }
+    compared += static_cast<std::int64_t>(a_frames);
+  }
   return true;
 }
 

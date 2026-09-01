@@ -1,8 +1,8 @@
 #include "amt/playback/Transport.h"
 
-#include <algorithm>
 #include <chrono>
 #include <thread>
+#include <utility>
 
 namespace amt::playback {
 
@@ -108,7 +108,10 @@ bool Transport::seek(const std::int64_t frame, std::string& error) {
   playhead_frame_.store(frame, std::memory_order_release);
   state_.store(TransportState::stopped, std::memory_order_release);
   if (was_playing) return start_device(error);
-  if (was_paused) state_.store(TransportState::paused, std::memory_order_release);
+  if (was_paused) {
+    if (!start_device(error)) return false;
+    return pause(error);
+  }
   return true;
 }
 

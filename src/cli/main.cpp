@@ -20,6 +20,7 @@ void usage() {
             << "  amt_cli probe <input>\n"
             << "  amt_cli analyze <input>\n"
             << "  amt_cli export <input> <output> [--sample-rate N] [--bits 16|24|32|float]\n"
+            << "  amt_cli compare <first> <second> [--tolerance value]\n"
             << "  amt_cli play <input>\n"
             << "  amt_cli rerender <input> <output>   # Phase 0 bit-exact compatibility\n"
             << "  amt_cli verify <first> <second>     # Phase 0 decoded-PCM comparison\n";
@@ -143,6 +144,27 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::cout << "export: ok\n";
+    return 0;
+  }
+
+  if (command == "compare" && argc >= 4) {
+    double tolerance = 1.0e-7;
+    if (argc == 6 && std::string(argv[4]) == "--tolerance") {
+      try {
+        tolerance = std::stod(argv[5]);
+      } catch (...) {
+        std::cerr << "invalid comparison tolerance\n";
+        return 2;
+      }
+    } else if (argc != 4) {
+      usage();
+      return 2;
+    }
+    if (!amt::codec::verify_audio_equal(codecs, argv[2], argv[3], tolerance, error)) {
+      std::cerr << "compare failed: " << error << '\n';
+      return 1;
+    }
+    std::cout << "compare: decoded audio matches within tolerance " << tolerance << '\n';
     return 0;
   }
 

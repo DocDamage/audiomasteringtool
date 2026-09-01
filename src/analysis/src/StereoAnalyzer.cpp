@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
+#include <cstdint>
 #include <stdexcept>
 
 namespace amt::analysis {
@@ -130,9 +130,11 @@ StereoMetrics StereoAnalyzer::finalize() const {
   result.mid_band_width = width(impl_->bands[1]);
   result.high_band_width = width(impl_->bands[2]);
   const double stereo_reference = (impl_->sum_left_square + impl_->sum_right_square) * 0.5;
-  result.mono_fold_down_delta_db = stereo_reference > 0.0 && impl_->sum_mono_square > 0.0
-                                      ? 10.0 * std::log10(impl_->sum_mono_square / stereo_reference)
-                                      : 0.0;
+  if (stereo_reference > 0.0) {
+    result.mono_fold_down_delta_db = impl_->sum_mono_square > 0.0
+        ? 10.0 * std::log10(impl_->sum_mono_square / stereo_reference)
+        : -200.0;
+  }
   result.negative_correlation_window_fraction = impl_->correlation_windows > 0U
       ? static_cast<double>(impl_->negative_windows) /
             static_cast<double>(impl_->correlation_windows)

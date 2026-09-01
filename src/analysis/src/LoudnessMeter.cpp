@@ -1,6 +1,7 @@
 #include "amt/analysis/LoudnessMeter.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -34,6 +35,27 @@ double percentile(std::vector<double> values, const double fraction) {
   return values[lower] * (1.0 - blend) + values[upper] * blend;
 }
 
+std::vector<int> annex1_channel_map(const std::size_t channels) {
+  switch (channels) {
+    case 1U:
+      return {EBUR128_LEFT};
+    case 2U:
+      return {EBUR128_LEFT, EBUR128_RIGHT};
+    case 3U:
+      return {EBUR128_LEFT, EBUR128_RIGHT, EBUR128_CENTER};
+    case 4U:
+      return {EBUR128_LEFT, EBUR128_RIGHT, EBUR128_LEFT_SURROUND, EBUR128_RIGHT_SURROUND};
+    case 5U:
+      return {EBUR128_LEFT, EBUR128_RIGHT, EBUR128_CENTER,
+              EBUR128_LEFT_SURROUND, EBUR128_RIGHT_SURROUND};
+    case 6U:
+      return {EBUR128_LEFT, EBUR128_RIGHT, EBUR128_CENTER, EBUR128_UNUSED,
+              EBUR128_LEFT_SURROUND, EBUR128_RIGHT_SURROUND};
+    default:
+      return {};
+  }
+}
+
 }  // namespace
 
 struct LoudnessMeter::Impl {
@@ -49,17 +71,19 @@ struct LoudnessMeter::Impl {
 
   Impl(const int rate, const std::size_t channel_count)
       : sample_rate(rate), channels(channel_count) {
-    if (sample_rate <= 0 || channels == 0U || channels > 6U) {
-      throw std::invalid_argument("BS.1770 Annex 1 meter supports 1-6 interleaved channels");
+    const auto channel_map = annex1_channel_map(channels);
+    if (sample_rate <= 0 || channel_map.empty()) {
+      throw std::invalid_argument("BS.1770 Annex 1 meter supports conventional 1-6 channel layouts");
     }
     const int mode = EBUR128_MODE_I | EBUR128_MODE_LRA | EBUR128_MODE_TRUE_PEAK;
     state = ebur128_init(static_cast<unsigned int>(channels),
                          static_cast<unsigned long>(sample_rate), mode);
     if (state == nullptr) throw std::runtime_error("failed to initialize loudness meter");
-    if (channels == 1U) {
-      if (ebur128_set_channel(state, 0U, EBUR128_LEFT) != EBUR128_SUCCESS) {
+    for (std::size_t channel = 0; channel < channel_map.size(); ++channel) {
+      if (ebur128_set_channel(state, static_cast<unsigned int>(channel), channel_map[channel]) !=
+          EBUR128_SUCCESS) {
         ebur128_destroy(&state);
-        throw std::runtime_error("failed to configure mono loudness channel");
+        throw std::runtime_error("failed to configure BS.1770 channel map");
       }
     }
   }

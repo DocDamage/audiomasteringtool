@@ -16,12 +16,23 @@ namespace amt::codec {
 enum class AudioContainer { unknown, wav, aiff, flac, ogg, mp3, aac_m4a, opus };
 enum class AudioSampleFormat { unknown, pcm16, pcm24, pcm32, float32, float64, compressed };
 
+enum class ChannelLayout {
+  unknown,
+  mono,
+  stereo,
+  three_zero,
+  quad,
+  five_zero,
+  five_one
+};
+
 struct AudioMetadata {
   std::int64_t frames{0};
   int sample_rate{0};
   int channels{0};
   int bit_depth{0};
   bool seekable{false};
+  ChannelLayout channel_layout{ChannelLayout::unknown};
   AudioContainer container{AudioContainer::unknown};
   AudioSampleFormat sample_format{AudioSampleFormat::unknown};
   std::string container_name;
@@ -94,7 +105,13 @@ bool export_audio(ICodecService& codecs, const std::filesystem::path& input,
                   const amt::core::CancellationToken* cancellation = nullptr,
                   const amt::core::ProgressCallback& progress = {});
 
+bool verify_audio_equal(ICodecService& codecs, const std::filesystem::path& first,
+                        const std::filesystem::path& second, double tolerance,
+                        std::string& error,
+                        const amt::core::CancellationToken* cancellation = nullptr);
+
 [[nodiscard]] AudioContainer container_from_extension(const std::filesystem::path& path);
+[[nodiscard]] ChannelLayout channel_layout_from_count(int channels) noexcept;
 [[nodiscard]] int integer_bit_depth(AudioSampleFormat format) noexcept;
 
 }  // namespace amt::codec

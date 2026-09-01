@@ -4,6 +4,7 @@ add_library(amt_mastering STATIC
   src/OfflineRenderer.cpp
   src/Audition.cpp
   src/SourceGuidedMastering.cpp
+  src/SourceGuidedCalibration.cpp
   src/DesktopMastering.cpp
 )
 target_include_directories(amt_mastering PUBLIC include)

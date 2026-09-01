@@ -173,39 +173,44 @@ std::optional<SourceGuidedStereoRenderResult> render_source_guided_stereo(
     return std::nullopt;
   }
 
+  const auto discard_partial = [&encoder, &partial]() noexcept {
+    encoder.reset();
+    remove_if_exists(partial);
+  };
+
   std::int64_t processed_frames = 0;
   while (true) {
     if (cancellation != nullptr && cancellation->is_cancelled()) {
       error = "source-guided stereo render cancelled";
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
 
     amt::audio::AudioBuffer block;
     std::size_t frames_read = 0U;
     if (!decoder->read(block, kReadFrames, frames_read, error, cancellation)) {
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
     if (frames_read == 0U) break;
     if (block.channels() != static_cast<std::size_t>(metadata.channels) ||
         block.frames() != frames_read) {
       error = "canonical decoder returned an unexpected source-guided stereo block";
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
     if (frames_read > static_cast<std::size_t>(
                           std::numeric_limits<std::int64_t>::max() - processed_frames)) {
       error = "source-guided stereo render frame counter overflow";
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
     if (!executor.process(block, error)) {
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
     if (!encoder->write(block, error, cancellation)) {
-      remove_if_exists(partial);
+      discard_partial();
       return std::nullopt;
     }
     processed_frames += static_cast<std::int64_t>(frames_read);
@@ -219,13 +224,15 @@ std::optional<SourceGuidedStereoRenderResult> render_source_guided_stereo(
 
   if (cancellation != nullptr && cancellation->is_cancelled()) {
     error = "source-guided stereo render cancelled";
-    remove_if_exists(partial);
+    discard_partial();
     return std::nullopt;
   }
   if (!encoder->finalize(error)) {
-    remove_if_exists(partial);
+    discard_partial();
     return std::nullopt;
   }
+  encoder.reset();
+
   if (metadata.frames > 0 && processed_frames != metadata.frames) {
     error = "source-guided stereo render frame count does not match the canonical source";
     remove_if_exists(partial);

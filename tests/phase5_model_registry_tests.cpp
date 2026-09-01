@@ -49,6 +49,7 @@ std::string valid_active_registry(const std::string& overrides = {}) {
       "executionProviders": ["cpu", "cuda"],
       "inputSampleRate": 48000,
       "stemTaxonomy": ["vocals", "drums", "bass", "other"],
+      "automaticMode1Approved": false,
       "onnxContract": {
         "inputTensor": "audio",
         "outputTensor": "stems",
@@ -127,6 +128,7 @@ void test_valid_active_registry_maps_worker_contract() {
   assert(config.contract.overlap_frames == 16384U);
   assert(config.contract.calibrated_output_confidence == 0.91);
   assert(!config.contract.complete_reconstruction);
+  assert(!config.automatic_mode1_approved);
   assert(config.execution_provider == "cpu");
   assert(config.model_artifact == root / "models" / "synthetic" / "model.onnx");
   assert(config.fallback_output_root == root / "source-estimates");
@@ -208,6 +210,41 @@ void test_bad_onnx_contract_is_rejected() {
   std::filesystem::remove_all(root, ignored);
 }
 
+void test_mode1_approval_is_data_driven() {
+  const auto root = test_root("mode1-approval");
+  const auto registry = root / "models" / "registry.json";
+  write_text(registry, valid_active_registry(
+      "\"automaticMode1Approved\": false="
+      "\"automaticMode1Approved\": true"));
+
+  std::string error;
+  const auto selection = amt::separation::load_model_registry_selection(
+      registry, root / "amt_worker.exe", error);
+  assert(selection.has_value());
+  assert(error.empty());
+  assert(selection->active_separation_model.has_value());
+  assert(selection->active_separation_model->automatic_mode1_approved);
+
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+}
+
+void test_missing_mode1_approval_is_rejected() {
+  const auto root = test_root("mode1-missing");
+  const auto registry = root / "models" / "registry.json";
+  write_text(registry, valid_active_registry(
+      "      \"automaticMode1Approved\": false,\n="));
+
+  std::string error;
+  const auto selection = amt::separation::load_model_registry_selection(
+      registry, root / "amt_worker.exe", error);
+  assert(!selection.has_value());
+  assert(error.find("automaticMode1Approved") != std::string::npos);
+
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+}
+
 void test_unapproved_security_review_is_not_production_eligible() {
   const auto root = test_root("security");
   const auto registry = root / "models" / "registry.json";
@@ -238,6 +275,8 @@ int main() {
   test_artifact_escape_is_rejected();
   test_active_model_requires_cpu_fallback();
   test_bad_onnx_contract_is_rejected();
+  test_mode1_approval_is_data_driven();
+  test_missing_mode1_approval_is_rejected();
   test_unapproved_security_review_is_not_production_eligible();
   return 0;
 }

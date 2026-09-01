@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -14,13 +15,33 @@ namespace amt::mastering {
 namespace {
 
 struct ScopedWorkDirectory {
-  std::filesystem::path path;
+  explicit ScopedWorkDirectory(std::filesystem::path value) : path(std::move(value)) {}
 
-  ~ScopedWorkDirectory() {
+  ScopedWorkDirectory(const ScopedWorkDirectory&) = delete;
+  ScopedWorkDirectory& operator=(const ScopedWorkDirectory&) = delete;
+
+  ScopedWorkDirectory(ScopedWorkDirectory&& other) noexcept : path(std::move(other.path)) {
+    other.path.clear();
+  }
+
+  ScopedWorkDirectory& operator=(ScopedWorkDirectory&& other) noexcept {
+    if (this == &other) return *this;
+    cleanup();
+    path = std::move(other.path);
+    other.path.clear();
+    return *this;
+  }
+
+  ~ScopedWorkDirectory() { cleanup(); }
+
+  void cleanup() noexcept {
     if (path.empty()) return;
     std::error_code ignored;
     std::filesystem::remove_all(path, ignored);
+    path.clear();
   }
+
+  std::filesystem::path path;
 };
 
 struct GuidedAttemptResult {
@@ -61,7 +82,7 @@ void append_warnings(std::vector<std::string>& destination,
             directory_error.message();
     return std::nullopt;
   }
-  return ScopedWorkDirectory{.path = path};
+  return std::optional<ScopedWorkDirectory>{std::in_place, path};
 }
 
 [[nodiscard]] std::optional<SourceGuidedMasteringRenderPair> render_mode0(

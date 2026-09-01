@@ -31,6 +31,12 @@ struct SourceGuidanceConfig {
   bool require_bundled_production_model_eligibility{true};
   bool enable_cache{true};
   bool compute_missing_source_fingerprint{true};
+
+  // Allows a provider invocation solely to gather source-estimate evidence. This
+  // must not itself authorize an intervention: the returned decision still uses
+  // the supplied evidence, so callers must analyze the estimates and re-run policy
+  // before selecting Mode 1. Default false preserves the original contract.
+  bool allow_diagnostic_separation{false};
 };
 
 struct SourceGuidanceResult {

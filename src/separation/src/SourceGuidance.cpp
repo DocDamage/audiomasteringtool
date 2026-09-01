@@ -53,6 +53,10 @@ namespace {
   });
 }
 
+[[nodiscard]] bool has_complete_reconstruction(const SeparationResult& result) {
+  return result.complete_reconstruction && has_stem_audio(result);
+}
+
 [[nodiscard]] SeparationDecision stereo_fallback(const SourceInterventionEvidence& evidence,
                                                  std::string reason) {
   SeparationDecision decision;
@@ -92,6 +96,7 @@ namespace {
   result.sample_rate = entry.sample_rate;
   result.frames = entry.frames;
   result.overall_confidence = entry.overall_confidence;
+  result.complete_reconstruction = entry.complete_reconstruction;
   result.artifacts.reserve(entry.artifacts.size());
   for (const auto& artifact : entry.artifacts) {
     result.artifacts.push_back({.kind = artifact.kind,
@@ -136,6 +141,11 @@ bool validate_provider_result(SeparationResult& result,
       return false;
     }
   }
+
+  if (result.complete_reconstruction && !has_stem_audio(result)) {
+    error = "separation provider marked a result as reconstructable without returning stem audio";
+    return false;
+  }
   return true;
 }
 
@@ -149,6 +159,7 @@ bool persist_cache_entry(SeparationCache& cache,
   entry.sample_rate = result.sample_rate;
   entry.frames = result.frames;
   entry.overall_confidence = result.overall_confidence;
+  entry.complete_reconstruction = result.complete_reconstruction;
   entry.artifacts.reserve(result.artifacts.size());
 
   for (const auto& artifact : result.artifacts) {
@@ -328,7 +339,7 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
 
   ArtifactAssessment artifact_for_policy = unknown_artifacts;
   if (request.evidence.reconstruction_required_for_full_repair &&
-      artifact_evaluator_ != nullptr && has_stem_audio(*output.separation)) {
+      artifact_evaluator_ != nullptr && has_complete_reconstruction(*output.separation)) {
     std::string artifact_error;
     const auto assessed = artifact_evaluator_->evaluate(
         request.separation.source_path, *output.separation, artifact_error, cancellation,
@@ -346,7 +357,13 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
     }
   } else {
     if (request.evidence.reconstruction_required_for_full_repair) {
-      output.warnings.emplace_back("reconstruction was requested but no validated stem-audio artifact assessment is available");
+      if (!output.separation->complete_reconstruction) {
+        output.warnings.emplace_back("reconstruction was requested but the provider did not return a complete reconstructable stem set");
+      } else if (!has_stem_audio(*output.separation)) {
+        output.warnings.emplace_back("reconstruction was requested but no validated stem-audio outputs are available");
+      } else if (artifact_evaluator_ == nullptr) {
+        output.warnings.emplace_back("reconstruction was requested but no artifact evaluator is configured");
+      }
     }
     amt::core::report_progress(progress, 1.0);
   }
@@ -359,13 +376,13 @@ std::optional<SourceGuidanceResult> SourceGuidanceOrchestrator::execute(
   output.decision = choose_separation_mode(effective_evidence, artifact_for_policy, config.policy);
 
   if (output.decision.mode == SeparationMode::stem_reconstruction &&
-      !has_stem_audio(*output.separation)) {
+      !has_complete_reconstruction(*output.separation)) {
     ArtifactAssessment reconstruction_blocked = artifact_for_policy;
     reconstruction_blocked.overall_risk = 1.0;
     reconstruction_blocked.confidence = 0.0;
     output.decision = choose_separation_mode(effective_evidence, reconstruction_blocked,
                                              config.policy);
-    output.decision.reasons.emplace_back("stem reconstruction was blocked because no stem-audio outputs were available");
+    output.decision.reasons.emplace_back("stem reconstruction was blocked because the separation result is not a complete reconstruction");
   }
 
   if (output.decision.mode == SeparationMode::source_guided_stereo &&

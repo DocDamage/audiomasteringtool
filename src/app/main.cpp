@@ -21,6 +21,7 @@
 #include <thread>
 #include <utility>
 
+#include "amt/analysis/DeepAnalysis.h"
 #include "amt/analysis/FileAnalyzer.h"
 #include "amt/codec/AudioIO.h"
 #include "amt/codec/SndFileCodec.h"
@@ -81,6 +82,7 @@ struct AppState {
   std::filesystem::path source_path;
   std::optional<amt::codec::AudioMetadata> metadata;
   std::optional<amt::analysis::Phase1AnalysisReport> report;
+  std::optional<amt::analysis::AnalysisReport> deep_report;
   std::optional<amt::mastering::MasteringPlan> mastering_plan;
   std::optional<amt::mastering::MasteringRenderPair> mastered;
   std::mutex result_mutex;
@@ -97,6 +99,12 @@ struct AppState {
     comparison.stop();
     transport.stop();
   }
+};
+
+struct ExportSelection {
+  std::filesystem::path source;
+  std::wstring suffix;
+  std::wstring label;
 };
 
 AppState* state_from(HWND window) {
@@ -148,7 +156,7 @@ void update_controls(AppState& state) {
   bool has_analysis = false;
   {
     std::scoped_lock lock(state.result_mutex);
-    has_analysis = state.report.has_value();
+    has_analysis = state.deep_report.has_value();
   }
   EnableWindow(state.open_button, !busy);
   EnableWindow(state.analyze_button, has_source && !busy);
@@ -180,7 +188,7 @@ void update_play_button(AppState& state) {
 void update_metrics_text(AppState& state) {
   std::scoped_lock lock(state.result_mutex);
   if (!state.report) {
-    SetWindowTextW(state.metrics, L"Analyze the track to populate technical metrics and mastering decisions.");
+    SetWindowTextW(state.metrics, L"Analyze the track to populate findings and mastering decisions.");
     return;
   }
 
@@ -192,13 +200,49 @@ void update_metrics_text(AppState& state) {
        << L"True peak: " << report.loudness.true_peak_dbtp << L" dBTP\r\n"
        << L"Crest factor: " << report.loudness.crest_factor_db << L" dB\r\n"
        << L"Peak-to-loudness ratio: " << report.loudness.peak_to_loudness_ratio_db << L" dB\r\n"
-       << L"Loudness range: " << report.loudness.loudness_range_lu << L" LU\r\n"
        << L"Spectral centroid: " << report.spectrum.centroid_hz << L" Hz\r\n"
        << L"Stereo correlation: " << report.stereo.correlation << L"\r\n"
        << L"Low / mid / high width: " << report.stereo.low_band_width << L" / "
-       << report.stereo.mid_band_width << L" / " << report.stereo.high_band_width << L"\r\n"
-       << L"Clipped samples: " << report.integrity.clipped_samples << L"\r\n"
-       << L"Maximum DC offset: " << report.integrity.max_absolute_dc_offset << L"\r\n";
+       << report.stereo.mid_band_width << L" / " << report.stereo.high_band_width << L"\r\n";
+
+  if (state.deep_report) {
+    const auto& deep = *state.deep_report;
+    text << L"\r\nSTRUCTURE\r\n"
+         << L"Tempo estimate: " << deep.structural.tempo.bpm << L" BPM (confidence "
+         << deep.structural.tempo.confidence << L")\r\n"
+         << L"Detected sections: " << deep.structural.sections.size() << L"\r\n"
+         << L"Section contrast: " << deep.structural.macro_dynamics.section_contrast_db << L" dB\r\n"
+         << L"Macro dynamic range: " << deep.structural.macro_dynamics.macro_dynamic_range_db << L" dB\r\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(8U, deep.structural.sections.size()); ++index) {
+      const auto& section = deep.structural.sections[index];
+      text << L"  " << section.start_seconds << L"–" << section.end_seconds << L" s — "
+           << widen_utf8(section.label_hint) << L"\r\n";
+    }
+
+    text << L"\r\nMIX HEALTH V1 — heuristic, not an objective quality score\r\n"
+         << L"Overall: " << deep.mix_health.overall_heuristic_score << L" / 100 — "
+         << widen_utf8(deep.mix_health.overall_assessment) << L" (confidence "
+         << deep.mix_health.overall_confidence << L")\r\n";
+    for (const auto& dimension : deep.mix_health.dimensions) {
+      text << L"  " << widen_utf8(dimension.label) << L": " << dimension.heuristic_score
+           << L" — " << widen_utf8(dimension.assessment) << L"\r\n";
+    }
+
+    text << L"\r\nCHARACTER / DEFECT HEURISTICS\r\n"
+         << L"Hard-clip likelihood: " << deep.character.hard_clip_likelihood << L"\r\n"
+         << L"Saturation likelihood: " << deep.character.saturation_likelihood << L"\r\n"
+         << L"Intentional-character likelihood: " << deep.character.intentional_character_likelihood << L"\r\n"
+         << L"Accidental-defect risk: " << deep.character.accidental_defect_risk << L"\r\n";
+
+    text << L"\r\nFINDINGS\r\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(12U, deep.findings.size()); ++index) {
+      const auto& finding = deep.findings[index];
+      text << L"[" << widen_utf8(amt::analysis::finding_severity_name(finding.severity)) << L"] "
+           << widen_utf8(finding.title) << L" — confidence " << finding.confidence
+           << (finding.heuristic ? L" (heuristic)" : L" (measurement)") << L"\r\n"
+           << L"  " << widen_utf8(finding.detail) << L"\r\n";
+    }
+  }
 
   if (state.mastering_plan) {
     text << L"\r\nMASTERING PLAN\r\n"
@@ -216,9 +260,7 @@ void update_metrics_text(AppState& state) {
          << L" LUFS / " << state.mastered->master_a.analysis.loudness.true_peak_dbtp << L" dBTP\r\n"
          << L"Master B: " << state.mastered->master_b.analysis.loudness.integrated_lufs
          << L" LUFS / " << state.mastered->master_b.analysis.loudness.true_peak_dbtp << L" dBTP\r\n"
-         << L"Audition reference: " << state.mastered->audition.reference_lufs << L" LUFS\r\n"
-         << L"Exports: " << state.mastered->master_a.output_path.wstring() << L"\r\n"
-         << L"         " << state.mastered->master_b.output_path.wstring();
+         << L"Audition reference: " << state.mastered->audition.reference_lufs << L" LUFS\r\n";
   }
   SetWindowTextW(state.metrics, text.str().c_str());
 }
@@ -232,7 +274,6 @@ void layout_controls(AppState& state) {
   constexpr int button_height = 30;
   constexpr int button_width = 92;
   constexpr int gap = 8;
-
   int x = margin;
   for (HWND button : {state.open_button, state.analyze_button, state.master_button,
                       state.export_button, state.cancel_button}) {
@@ -245,7 +286,6 @@ void layout_controls(AppState& state) {
     MoveWindow(button, x, 48, button_width, button_height, TRUE);
     x += button_width + gap;
   }
-
   MoveWindow(state.status, margin, 86, std::max(10, width - 2 * margin), 24, TRUE);
   const int waveform_top = 116;
   const int waveform_height = std::max(120, std::min(250, height / 3));
@@ -274,7 +314,6 @@ void draw_waveform(AppState& state, HDC dc) {
   DeleteObject(background);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, RGB(205, 211, 220));
-
   std::scoped_lock lock(state.result_mutex);
   if (!state.report || state.report->waveform.levels.empty()) {
     RECT text_area = area;
@@ -282,7 +321,6 @@ void draw_waveform(AppState& state, HDC dc) {
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     return;
   }
-
   const auto& levels = state.report->waveform.levels;
   const int width = std::max(1, static_cast<int>(area.right - area.left));
   const amt::audio::WaveformLevel* level = &levels.back();
@@ -294,7 +332,6 @@ void draw_waveform(AppState& state, HDC dc) {
     }
   }
   if (level->channels.empty() || level->channels.front().empty()) return;
-
   const std::size_t displayed_channels = std::min<std::size_t>(2U, level->channels.size());
   HPEN center_pen = CreatePen(PS_SOLID, 1, RGB(65, 70, 80));
   HPEN wave_pen = CreatePen(PS_SOLID, 1, RGB(71, 197, 214));
@@ -333,7 +370,6 @@ void draw_waveform(AppState& state, HDC dc) {
   SelectObject(dc, previous);
   DeleteObject(center_pen);
   DeleteObject(wave_pen);
-
   if (state.metadata && state.metadata->frames > 0) {
     const auto frame = std::clamp<std::int64_t>(active_playhead(state), 0, state.metadata->frames);
     const int x = static_cast<int>(area.left) + static_cast<int>(
@@ -355,7 +391,6 @@ bool load_source(AppState& state, const std::filesystem::path& path) {
     show_error(state.window, L"Unable to load audio", error);
     return false;
   }
-
   state.comparison.stop();
   state.transport.stop();
   state.comparison_ready = false;
@@ -367,6 +402,7 @@ bool load_source(AppState& state, const std::filesystem::path& path) {
   {
     std::scoped_lock lock(state.result_mutex);
     state.report.reset();
+    state.deep_report.reset();
     state.mastering_plan.reset();
     state.mastered.reset();
     state.worker_error.clear();
@@ -378,7 +414,6 @@ bool load_source(AppState& state, const std::filesystem::path& path) {
   update_metrics_text(state);
   update_controls(state);
   update_play_button(state);
-
   std::wostringstream status;
   status << L"Loaded: " << path.filename().wstring() << L" — "
          << metadata->sample_rate << L" Hz, " << metadata->channels << L" ch, "
@@ -415,7 +450,12 @@ void start_job(AppState& state, const wchar_t* status) {
 
 void begin_analysis(AppState& state) {
   if (!state.metadata || state.job_running.load(std::memory_order_acquire)) return;
-  start_job(state, L"Analyzing audio…");
+  state.comparison.stop();
+  state.comparison_ready = false;
+  state.transport.stop();
+  std::string playback_error;
+  if (state.playable) state.transport.load(state.source_path, playback_error);
+  start_job(state, L"Analyzing structure, dynamics, character, and translation…");
   const auto source = state.source_path;
   const auto cancellation = state.cancellation;
   HWND window = state.window;
@@ -423,7 +463,7 @@ void begin_analysis(AppState& state) {
   state.worker = std::thread([source, window, state_pointer, cancellation] {
     amt::codec::SndFileCodecService codecs;
     std::string error;
-    auto report = amt::analysis::analyze_file(
+    auto deep = amt::analysis::analyze_track(
         codecs, source, error, cancellation.get(),
         [window](const double progress) {
           PostMessageW(window, kJobProgress,
@@ -432,31 +472,31 @@ void begin_analysis(AppState& state) {
         });
     {
       std::scoped_lock lock(state_pointer->result_mutex);
-      if (report) {
-        state_pointer->report = std::move(*report);
+      if (deep) {
+        state_pointer->report = deep->technical;
+        state_pointer->deep_report = std::move(*deep);
         state_pointer->mastering_plan.reset();
         state_pointer->mastered.reset();
       }
       state_pointer->worker_error = std::move(error);
     }
     state_pointer->job_running.store(false, std::memory_order_release);
-    PostMessageW(window, kAnalysisFinished, report.has_value() ? 1U : 0U, 0);
+    PostMessageW(window, kAnalysisFinished, deep.has_value() ? 1U : 0U, 0);
   });
 }
 
 void begin_mastering(AppState& state) {
   if (state.job_running.load(std::memory_order_acquire)) return;
-  std::optional<amt::analysis::Phase1AnalysisReport> source_report;
+  std::optional<amt::analysis::AnalysisReport> source_report;
   {
     std::scoped_lock lock(state.result_mutex);
-    if (state.report) source_report = *state.report;
+    if (state.deep_report) source_report = *state.deep_report;
   }
   if (!source_report) return;
   state.comparison.stop();
   state.transport.stop();
   state.comparison_ready = false;
-  start_job(state, L"Creating Master A and Master B…");
-
+  start_job(state, L"Creating analysis-aware Master A and preservation-biased Master B…");
   const auto source = state.source_path;
   const auto output_directory = source.parent_path() / (source.stem().wstring() + L"_AMT_Masters");
   const auto cancellation = state.cancellation;
@@ -468,7 +508,7 @@ void begin_mastering(AppState& state) {
     std::string error;
     auto plan = amt::mastering::plan_mastering(report);
     auto rendered = amt::mastering::render_mastering_plan(
-        codecs, source, output_directory, report, plan, error, {}, cancellation.get(),
+        codecs, source, output_directory, report.technical, plan, error, {}, cancellation.get(),
         [window](const double progress) {
           PostMessageW(window, kJobProgress,
                        static_cast<WPARAM>(std::clamp(
@@ -485,9 +525,28 @@ void begin_mastering(AppState& state) {
   });
 }
 
-std::optional<std::filesystem::path> choose_export_path(AppState& state) {
+ExportSelection current_export_selection(AppState& state) {
+  if (!state.comparison_ready) {
+    return {.source = state.source_path, .suffix = L"_Original", .label = L"Original"};
+  }
+  const auto selected = state.comparison.selected_source();
+  std::scoped_lock lock(state.result_mutex);
+  if (!state.mastered) {
+    return {.source = state.source_path, .suffix = L"_Original", .label = L"Original"};
+  }
+  if (selected == amt::playback::ComparisonSource::master_a) {
+    return {.source = state.mastered->master_a.output_path, .suffix = L"_Master_A", .label = L"Master A"};
+  }
+  if (selected == amt::playback::ComparisonSource::master_b) {
+    return {.source = state.mastered->master_b.output_path, .suffix = L"_Master_B", .label = L"Master B"};
+  }
+  return {.source = state.source_path, .suffix = L"_Original", .label = L"Original"};
+}
+
+std::optional<std::filesystem::path> choose_export_path(AppState& state,
+                                                         const ExportSelection& selection) {
   wchar_t path_buffer[32768]{};
-  const std::wstring suggested = state.source_path.stem().wstring() + L"_pass-through";
+  const std::wstring suggested = state.source_path.stem().wstring() + selection.suffix;
   const auto copy_count = std::min<std::size_t>(suggested.size(), std::size(path_buffer) - 1U);
   std::copy_n(suggested.c_str(), copy_count, path_buffer);
   OPENFILENAMEW dialog{};
@@ -508,14 +567,20 @@ std::optional<std::filesystem::path> choose_export_path(AppState& state) {
 
 void begin_export(AppState& state) {
   if (!state.metadata || state.job_running.load(std::memory_order_acquire)) return;
-  const auto output = choose_export_path(state);
+  const auto selection = current_export_selection(state);
+  const auto output = choose_export_path(state, selection);
   if (!output) return;
-  start_job(state, L"Exporting transparent pass-through…");
-  const auto source = state.source_path;
+  if (output->lexically_normal() == selection.source.lexically_normal()) {
+    show_error(state.window, L"Export path", "Choose a different path so the selected source is not overwritten in place.");
+    return;
+  }
+  const std::wstring status = L"Exporting selected " + selection.label + L"…";
+  start_job(state, status.c_str());
   const auto cancellation = state.cancellation;
   HWND window = state.window;
   AppState* state_pointer = &state;
-  state.worker = std::thread([source, output = *output, window, state_pointer, cancellation] {
+  state.worker = std::thread([source = selection.source, output = *output, window,
+                              state_pointer, cancellation] {
     amt::codec::SndFileCodecService codecs;
     std::string error;
     const bool success = amt::codec::export_audio(
@@ -535,16 +600,22 @@ void begin_export(AppState& state) {
 }
 
 bool prepare_comparison(AppState& state) {
-  std::scoped_lock lock(state.result_mutex);
-  if (!state.mastered || !state.playable) return false;
+  amt::playback::ComparisonItem original;
+  amt::playback::ComparisonItem master_a;
+  amt::playback::ComparisonItem master_b;
+  {
+    std::scoped_lock lock(state.result_mutex);
+    if (!state.mastered || !state.playable) return false;
+    original = {.path = state.source_path,
+                .audition_gain_db = state.mastered->audition.original_gain_db};
+    master_a = {.path = state.mastered->master_a.output_path,
+                .audition_gain_db = state.mastered->audition.master_a_gain_db};
+    master_b = {.path = state.mastered->master_b.output_path,
+                .audition_gain_db = state.mastered->audition.master_b_gain_db};
+  }
   std::string error;
   state.transport.stop();
-  const auto& rendered = *state.mastered;
-  const bool loaded = state.comparison.load(
-      {.path = state.source_path, .audition_gain_db = rendered.audition.original_gain_db},
-      {.path = rendered.master_a.output_path, .audition_gain_db = rendered.audition.master_a_gain_db},
-      {.path = rendered.master_b.output_path, .audition_gain_db = rendered.audition.master_b_gain_db}, error);
-  if (!loaded) {
+  if (!state.comparison.load(original, master_a, master_b, error)) {
     show_error(state.window, L"Unable to prepare A/B audition", error);
     return false;
   }
@@ -583,6 +654,9 @@ void select_audition_source(AppState& state, const amt::playback::ComparisonSour
       current != amt::playback::TransportState::paused) {
     if (!state.comparison.play(error)) show_error(state.window, L"Audition error", error);
   }
+  const wchar_t* label = source == amt::playback::ComparisonSource::original ? L"Original" :
+                         (source == amt::playback::ComparisonSource::master_a ? L"Master A" : L"Master B");
+  set_status(state, std::wstring(L"Loudness-matched audition: ") + label);
   update_play_button(state);
 }
 
@@ -633,7 +707,7 @@ void finish_mastering(AppState& state, const bool success) {
   SendMessageW(state.progress, PBM_SETPOS, success ? 1000 : 0, 0);
   if (success) {
     if (prepare_comparison(state)) {
-      set_status(state, L"Masters complete — Master A recommended. Use Original / Master A / Master B to compare.");
+      set_status(state, L"Masters complete — Master A recommended. Original/A/B audition is loudness-matched.");
     } else {
       set_status(state, L"Masters complete. A/B audition could not be initialized.");
     }
@@ -699,7 +773,7 @@ void create_controls(AppState& state) {
                                    0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
   SendMessageW(state.progress, PBM_SETRANGE32, 0, 1000);
   state.metrics = CreateWindowExW(
-      WS_EX_CLIENTEDGE, L"EDIT", L"Analyze the track to populate technical metrics and mastering decisions.",
+      WS_EX_CLIENTEDGE, L"EDIT", L"Analyze the track to populate findings and mastering decisions.",
       WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
       0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
   update_controls(state);
@@ -755,10 +829,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
       if (state != nullptr) SendMessageW(state->progress, PBM_SETPOS, wparam, 0);
       return 0;
     case kAnalysisFinished:
-      if (state != nullptr) finish_job(*state, wparam != 0U, L"Analysis complete — ready to master.");
+      if (state != nullptr) finish_job(*state, wparam != 0U, L"Analysis complete — findings are ready and mastering can begin.");
       return 0;
     case kExportFinished:
-      if (state != nullptr) finish_job(*state, wparam != 0U, L"Transparent export complete.");
+      if (state != nullptr) finish_job(*state, wparam != 0U, L"Selected version export complete.");
       return 0;
     case kMasterFinished:
       if (state != nullptr) finish_mastering(*state, wparam != 0U);
@@ -812,6 +886,22 @@ int run_phase2_self_test(const std::filesystem::path& input,
   return 0;
 }
 
+int run_phase3_self_test(const std::filesystem::path& input,
+                         const std::filesystem::path& output_directory) {
+  amt::codec::SndFileCodecService codecs;
+  if (!codecs.available()) return 30;
+  std::string error;
+  const auto report = amt::analysis::analyze_track(codecs, input, error);
+  if (!report || report->schema_version != 2 || report->mix_health.dimensions.empty() ||
+      report->findings.empty()) return 31;
+  const auto plan = amt::mastering::plan_mastering(*report);
+  const auto rendered = amt::mastering::render_mastering_plan(
+      codecs, input, output_directory, report->technical, plan, error);
+  if (!rendered) return 32;
+  if (!rendered->master_a.peak_ceiling_met || !rendered->master_b.peak_ceiling_met) return 33;
+  return 0;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
@@ -826,6 +916,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   if (arguments != nullptr && argument_count == 4 &&
       std::wstring(arguments[1]) == L"--phase2-self-test") {
     const int result = run_phase2_self_test(arguments[2], arguments[3]);
+    LocalFree(arguments);
+    return result;
+  }
+  if (arguments != nullptr && argument_count == 4 &&
+      std::wstring(arguments[1]) == L"--phase3-self-test") {
+    const int result = run_phase3_self_test(arguments[2], arguments[3]);
     LocalFree(arguments);
     return result;
   }
@@ -845,7 +941,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   if (RegisterClassW(&window_class) == 0) return 1;
 
   auto* state = new AppState();
-  std::wstring title = L"AudioMasteringTool — Phase 2 — ";
+  std::wstring title = L"AudioMasteringTool — Phase 3 — ";
   title += widen_utf8(std::string(amt::core::version()));
   HWND window = CreateWindowExW(
       0, kWindowClass, title.c_str(), WS_OVERLAPPEDWINDOW,
@@ -854,7 +950,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     delete state;
     return 1;
   }
-
   ShowWindow(window, show_command);
   UpdateWindow(window);
   MSG message{};

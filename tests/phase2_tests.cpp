@@ -1,29 +1,140 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <numbers>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "amt/analysis/FileAnalyzer.h"
 #include "amt/audio/AudioBuffer.h"
+#include "amt/codec/AudioIO.h"
 #include "amt/dsp/Processors.h"
 #include "amt/mastering/Audition.h"
 #include "amt/mastering/Planner.h"
 #include "amt/mastering/ProcessingGraph.h"
+#include "amt/playback/ComparisonTransport.h"
 
 namespace {
 
 double max_abs(const amt::audio::AudioBuffer& buffer) {
   double peak = 0.0;
   for (std::size_t channel = 0; channel < buffer.channels(); ++channel) {
-    for (const float sample : buffer.channel(channel)) peak = std::max(peak, std::abs(static_cast<double>(sample)));
+    for (const float sample : buffer.channel(channel)) {
+      peak = std::max(peak, std::abs(static_cast<double>(sample)));
+    }
   }
   return peak;
 }
 
-}  // namespace
+class ConstantDecoder final : public amt::codec::IAudioDecoder {
+ public:
+  explicit ConstantDecoder(const float value) : value_(value) {
+    metadata_.frames = 2048;
+    metadata_.sample_rate = 48000;
+    metadata_.channels = 2;
+    metadata_.bit_depth = 32;
+    metadata_.seekable = true;
+    metadata_.channel_layout = amt::codec::ChannelLayout::stereo;
+    metadata_.container = amt::codec::AudioContainer::wav;
+    metadata_.sample_format = amt::codec::AudioSampleFormat::float32;
+  }
+  const amt::codec::AudioMetadata& metadata() const noexcept override { return metadata_; }
+  std::int64_t tell() const noexcept override { return position_; }
+  bool seek(const std::int64_t frame, std::string& error) override {
+    if (frame < 0 || frame > metadata_.frames) {
+      error = "bad seek";
+      return false;
+    }
+    position_ = frame;
+    return true;
+  }
+  bool read(amt::audio::AudioBuffer& output, const std::size_t max_frames,
+            std::size_t& frames_read, std::string&,
+            const amt::core::CancellationToken* cancellation = nullptr) override {
+    if (cancellation != nullptr && cancellation->is_cancelled()) return false;
+    frames_read = static_cast<std::size_t>(std::min<std::int64_t>(
+        static_cast<std::int64_t>(max_frames), metadata_.frames - position_));
+    output.resize(2U, frames_read);
+    for (std::size_t channel = 0; channel < 2U; ++channel) {
+      std::fill(output.channel(channel).begin(), output.channel(channel).end(), value_);
+    }
+    position_ += static_cast<std::int64_t>(frames_read);
+    return true;
+  }
+ private:
+  float value_{0.0F};
+  amt::codec::AudioMetadata metadata_;
+  std::int64_t position_{0};
+};
 
-int main() {
+class ComparisonCodec final : public amt::codec::ICodecService {
+ public:
+  bool available() const noexcept override { return true; }
+  std::string backend_name() const override { return "comparison-memory"; }
+  std::string backend_error() const override { return {}; }
+  std::vector<amt::codec::CodecCapability> capabilities() const override { return {}; }
+  std::optional<amt::codec::AudioMetadata> probe(
+      const std::filesystem::path& path, std::string& error) const override {
+    auto decoder = open_decoder(path, error);
+    if (!decoder) return std::nullopt;
+    return decoder->metadata();
+  }
+  std::unique_ptr<amt::codec::IAudioDecoder> open_decoder(
+      const std::filesystem::path& path, std::string&) const override {
+    const auto name = path.filename().string();
+    if (name == "original.wav") return std::make_unique<ConstantDecoder>(0.10F);
+    if (name == "a.wav") return std::make_unique<ConstantDecoder>(0.20F);
+    return std::make_unique<ConstantDecoder>(0.30F);
+  }
+  std::unique_ptr<amt::codec::IAudioEncoder> open_encoder(
+      const std::filesystem::path&, const amt::codec::EncodeSettings&,
+      std::string& error) const override {
+    error = "unused";
+    return nullptr;
+  }
+};
+
+class CaptureDevice final : public amt::playback::IAudioOutputDevice {
+ public:
+  bool open(amt::playback::AudioOutputConfig,
+            amt::playback::AudioRenderCallback callback, std::string&) override {
+    callback_ = std::move(callback);
+    return true;
+  }
+  bool start(std::string&) override {
+    running_ = true;
+    while (running_) {
+      amt::audio::AudioBuffer buffer;
+      const auto frames = callback_(buffer, 256U);
+      if (frames == 0U) {
+        running_ = false;
+        break;
+      }
+      if (buffer.channels() > 0U && frames > 0U) {
+        last_sample_ = buffer.channel(0U)[frames - 1U];
+      }
+    }
+    return true;
+  }
+  bool pause(std::string&) override { return true; }
+  bool resume(std::string&) override { return true; }
+  void stop() noexcept override { running_ = false; }
+  bool running() const noexcept override { return running_; }
+  std::string backend_name() const override { return "capture"; }
+  float last_sample() const noexcept { return last_sample_; }
+ private:
+  amt::playback::AudioRenderCallback callback_;
+  bool running_{false};
+  float last_sample_{0.0F};
+};
+
+void test_processing_graph() {
   amt::audio::AudioBuffer buffer(2U, 4096U);
   for (std::size_t frame = 0; frame < buffer.frames(); ++frame) {
     const double value = 0.55 * std::sin(2.0 * std::numbers::pi * 440.0 *
@@ -50,7 +161,9 @@ int main() {
   duplicate.add({.id = "x", .params = amt::dsp::GainParams{}});
   duplicate.add({.id = "x", .params = amt::dsp::GainParams{}});
   assert(!duplicate.validate(error));
+}
 
+void test_planner_and_loudness_match() {
   amt::analysis::Phase1AnalysisReport report;
   report.metadata.sample_rate = 48000;
   report.metadata.channels = 2;
@@ -71,8 +184,8 @@ int main() {
   report.stereo.low_band_width = 0.24;
   report.stereo.mid_band_width = 0.22;
   report.integrity.clipped_samples = 0;
-  report.integrity.max_absolute_dc_offset = 0.0;
 
+  std::string error;
   const auto plan = amt::mastering::plan_mastering(report);
   assert(plan.master_a.recommended);
   assert(!plan.master_b.recommended);
@@ -93,6 +206,31 @@ int main() {
   assert(std::abs(audition.original_gain_db) < 1.0e-9);
   assert(audition.master_a_gain_db < audition.master_b_gain_db);
   assert(audition.master_a_gain_db <= 0.0 && audition.master_b_gain_db <= 0.0);
+}
 
+void test_synchronized_comparison_transport() {
+  ComparisonCodec codecs;
+  auto device = std::make_unique<CaptureDevice>();
+  auto* capture = device.get();
+  amt::playback::ComparisonTransport transport(codecs, std::move(device));
+  std::string error;
+  assert(transport.load({.path = "original.wav", .audition_gain_db = 0.0},
+                        {.path = "a.wav", .audition_gain_db = 0.0},
+                        {.path = "b.wav", .audition_gain_db = 0.0}, error));
+  transport.select(amt::playback::ComparisonSource::master_b);
+  assert(transport.play(error));
+  assert(transport.state() == amt::playback::TransportState::finished);
+  assert(transport.playhead_frame() == 2048);
+  assert(std::abs(capture->last_sample() - 0.30F) < 1.0e-4F);
+  assert(transport.seek(512, error));
+  assert(transport.playhead_frame() == 512);
+}
+
+}  // namespace
+
+int main() {
+  test_processing_graph();
+  test_planner_and_loudness_match();
+  test_synchronized_comparison_transport();
   return 0;
 }

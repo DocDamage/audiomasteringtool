@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -239,9 +241,9 @@ int main(int argc, char** argv) {
           const double seconds = std::stod(line.substr(2U));
           const auto* metadata = transport.metadata();
           if (metadata != nullptr) {
+            const double duration = metadata->frames / static_cast<double>(metadata->sample_rate);
             const auto frame = static_cast<std::int64_t>(
-                std::clamp(seconds, 0.0, metadata->frames / static_cast<double>(metadata->sample_rate)) *
-                metadata->sample_rate);
+                std::clamp(seconds, 0.0, duration) * metadata->sample_rate);
             if (!transport.seek(frame, error)) std::cerr << error << '\n';
           }
         } catch (...) {

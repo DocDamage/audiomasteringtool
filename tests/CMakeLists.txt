@@ -16,8 +16,10 @@ add_executable(amt_phase2_tests phase2_tests.cpp)
 target_link_libraries(amt_phase2_tests PRIVATE
   amt_core
   amt_audio
+  amt_codec
   amt_analysis
   amt_dsp
   amt_mastering
+  amt_playback
 )
 add_test(NAME phase2_deterministic_mastering COMMAND amt_phase2_tests)

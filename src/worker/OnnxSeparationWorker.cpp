@@ -318,8 +318,10 @@ bool onnx_separation_compiled() noexcept {
 
 std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
     const OnnxSeparationWorkerRequest& request,
-    std::string& error) {
+    std::string& error,
+    const amt::core::ProgressCallback& progress) {
   error.clear();
+  amt::core::report_progress(progress, 0.0);
   if (!validate_request(request, error)) return std::nullopt;
 
 #ifndef AMT_WITH_ONNX
@@ -345,6 +347,7 @@ std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
 
     auto model_input = prepare_model_input(codecs, request, error);
     if (!model_input) return std::nullopt;
+    amt::core::report_progress(progress, 0.10);
 
     auto decoder = codecs.open_decoder(model_input->path, error);
     if (!decoder) return std::nullopt;
@@ -386,6 +389,7 @@ std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     configure_execution_provider(options, request.execution_provider);
     Ort::Session session(environment, request.model_path.c_str(), options);
+    amt::core::report_progress(progress, 0.15);
 
     const std::size_t chunk_frames = request.chunk_frames;
     const std::size_t overlap_frames = request.overlap_frames;
@@ -434,6 +438,11 @@ std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
       if (!final_chunk) {
         save_tail(values, stem_count, chunk_frames, overlap_frames, previous_tails);
       }
+      const auto processed = std::min<std::int64_t>(
+          metadata.frames, start + static_cast<std::int64_t>(read));
+      const double fraction = static_cast<double>(processed) /
+                              static_cast<double>(metadata.frames);
+      amt::core::report_progress(progress, 0.15 + fraction * 0.80);
       first_chunk = false;
       if (final_chunk) break;
     }
@@ -441,12 +450,14 @@ std::optional<OnnxSeparationWorkerResult> run_onnx_separation(
     for (auto& encoder : encoders) {
       if (!encoder->finalize(error)) return std::nullopt;
     }
+    amt::core::report_progress(progress, 0.99);
 
     cleanup.committed = true;
     OnnxSeparationWorkerResult result;
     result.sample_rate = request.input_sample_rate;
     result.frames = metadata.frames;
     result.stem_paths = cleanup.paths;
+    amt::core::report_progress(progress, 1.0);
     return result;
   } catch (const Ort::Exception& exception) {
     error = std::string("ONNX Runtime separation failed: ") + exception.what();

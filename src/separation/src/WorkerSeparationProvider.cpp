@@ -149,6 +149,32 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
                  std::to_string(sequence));
 }
 
+void cleanup_worker_artifacts(const std::filesystem::path& output_directory) noexcept {
+  std::error_code ignored;
+  std::filesystem::remove_all(output_directory / "stems", ignored);
+  ignored.clear();
+  std::filesystem::remove(output_directory / ".amt-model-input.wav", ignored);
+}
+
+bool reset_worker_artifacts(const std::filesystem::path& output_directory,
+                            std::string& error) {
+  std::error_code remove_error;
+  std::filesystem::remove_all(output_directory / "stems", remove_error);
+  if (remove_error) {
+    error = "unable to clear stale separation stem artifacts: " +
+            remove_error.message();
+    return false;
+  }
+  remove_error.clear();
+  std::filesystem::remove(output_directory / ".amt-model-input.wav", remove_error);
+  if (remove_error) {
+    error = "unable to clear stale separation model-input artifact: " +
+            remove_error.message();
+    return false;
+  }
+  return true;
+}
+
 [[nodiscard]] std::optional<std::int64_t> extract_int64(
     const std::string& json,
     const std::string& key) {
@@ -610,10 +636,16 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
             directory_error.message();
     return std::nullopt;
   }
+  if (!reset_worker_artifacts(output_directory, error)) return std::nullopt;
+
+  const auto fail_after_output_preparation = [&]() -> std::optional<SeparationResult> {
+    cleanup_worker_artifacts(output_directory);
+    return std::nullopt;
+  };
 
   const auto worker_json = run_worker_process(
       config_, request, output_directory, error, cancellation, progress);
-  if (!worker_json) return std::nullopt;
+  if (!worker_json) return fail_after_output_preparation();
 
   const auto sample_rate = extract_int64(*worker_json, "sampleRate");
   const auto frames = extract_int64(*worker_json, "frames");
@@ -623,13 +655,13 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
       *frames <= 0 ||
       *stem_count != static_cast<std::int64_t>(config_.manifest.stem_taxonomy.size())) {
     error = "separation worker returned geometry inconsistent with the model contract";
-    return std::nullopt;
+    return fail_after_output_preparation();
   }
 
   amt::codec::SndFileCodecService codecs;
   if (!codecs.available()) {
     error = "unable to validate worker stem outputs because the codec backend is unavailable";
-    return std::nullopt;
+    return fail_after_output_preparation();
   }
 
   SeparationResult result;
@@ -650,7 +682,7 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
       error = "worker stem output failed geometry validation for " +
               stem_role_name(role);
       if (!probe_error.empty()) error += ": " + probe_error;
-      return std::nullopt;
+      return fail_after_output_preparation();
     }
     result.artifacts.push_back({
         .kind = CacheArtifactKind::stem_audio,
@@ -659,6 +691,10 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
         .confidence = result.overall_confidence});
   }
 
+  // The worker normally removes this itself. Parent cleanup makes success robust
+  // to a worker that completed after a resample but failed to delete its temporary.
+  std::error_code ignored;
+  std::filesystem::remove(output_directory / ".amt-model-input.wav", ignored);
   amt::core::report_progress(progress, 1.0);
   return result;
 #endif

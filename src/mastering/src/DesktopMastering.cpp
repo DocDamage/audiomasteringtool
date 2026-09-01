@@ -135,6 +135,24 @@ void add_mode_rationale(MasteringPlan& plan, const std::string& label) {
   add(plan.master_b);
 }
 
+[[nodiscard]] std::string json_escape(const std::string& text) {
+  std::ostringstream output;
+  for (const unsigned char c : text) {
+    switch (c) {
+      case '\\': output << "\\\\"; break;
+      case '"': output << "\\\""; break;
+      case '\n': output << "\\n"; break;
+      case '\r': output << "\\r"; break;
+      case '\t': output << "\\t"; break;
+      default:
+        if (c < 0x20U) output << '?';
+        else output << static_cast<char>(c);
+        break;
+    }
+  }
+  return output.str();
+}
+
 [[nodiscard]] std::string diagnostic_statement(
     const amt::separation::SourceGuidedIssue& issue,
     const bool source_guidance_applied) {
@@ -181,6 +199,67 @@ void add_source_diagnostics(
       plan.master_a.rationale.push_back(statement);
     }
   }
+}
+
+void fill_desktop_report(
+    DesktopMasteringReport& report,
+    const PreparedGuidance& prepared,
+    const SourceGuidedMasteringRenderPair& rendered) {
+  report.source_diagnostics_performed = prepared.analysis_performed;
+  report.source_guidance_applied = rendered.source_guidance_applied;
+  report.automatic_mode1_approved = prepared.automatic_mode1_approved;
+
+  std::ostringstream summary;
+  if (!prepared.analysis_performed) {
+    summary << "Source diagnostics were unavailable; canonical stereo mastering was used.";
+  } else if (rendered.source_guidance_applied) {
+    summary << "Source diagnostics completed and source-guided stereo processing was applied.";
+  } else if (!prepared.automatic_mode1_approved) {
+    summary << "Source diagnostics completed; canonical stereo mastering was retained because automatic Mode 1 remains calibration-gated.";
+  } else {
+    summary << "Source diagnostics completed; measured evidence did not require source-guided processing.";
+  }
+  if (!prepared.issues.empty()) {
+    summary << " " << prepared.issues.size() << " source-specific issue(s) were measured.";
+  }
+  report.summary = summary.str();
+
+  std::ostringstream json;
+  json << "{\n"
+       << "  \"schemaVersion\": 1,\n"
+       << "  \"sourceDiagnosticsPerformed\": "
+       << (report.source_diagnostics_performed ? "true" : "false") << ",\n"
+       << "  \"sourceGuidanceApplied\": "
+       << (report.source_guidance_applied ? "true" : "false") << ",\n"
+       << "  \"automaticMode1Approved\": "
+       << (report.automatic_mode1_approved ? "true" : "false") << ",\n"
+       << "  \"requestedMode\": \""
+       << amt::separation::separation_mode_name(rendered.requested_mode) << "\",\n"
+       << "  \"renderedMode\": \""
+       << amt::separation::separation_mode_name(rendered.rendered_mode) << "\",\n"
+       << "  \"appliedBindings\": " << rendered.applied_bindings << ",\n"
+       << "  \"summary\": \"" << json_escape(report.summary) << "\",\n"
+       << "  \"issues\": [\n";
+  for (std::size_t index = 0U; index < prepared.issues.size(); ++index) {
+    const auto& issue = prepared.issues[index];
+    json << "    {\"source\": \""
+         << amt::separation::stem_role_name(issue.source)
+         << "\", \"type\": \""
+         << amt::separation::source_guided_issue_name(issue.type)
+         << "\", \"severity\": " << issue.severity
+         << ", \"confidence\": " << issue.confidence
+         << ", \"evidence\": \"" << json_escape(issue.evidence) << "\"}";
+    if (index + 1U < prepared.issues.size()) json << ',';
+    json << '\n';
+  }
+  json << "  ],\n  \"warnings\": [\n";
+  for (std::size_t index = 0U; index < rendered.warnings.size(); ++index) {
+    json << "    \"" << json_escape(rendered.warnings[index]) << "\"";
+    if (index + 1U < rendered.warnings.size()) json << ',';
+    json << '\n';
+  }
+  json << "  ]\n}\n";
+  report.json = json.str();
 }
 
 [[nodiscard]] std::optional<PreparedGuidance> prepare_guidance(
@@ -337,7 +416,8 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
     std::string& error,
     const RenderSettings& settings,
     const amt::core::CancellationToken* cancellation,
-    const amt::core::ProgressCallback& progress) {
+    const amt::core::ProgressCallback& progress,
+    DesktopMasteringReport* report) {
   error.clear();
   auto prepared = prepare_guidance(
       codecs, canonical_input, output_directory, source_analysis, error,
@@ -374,6 +454,7 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
 
   add_source_diagnostics(plan, prepared->issues,
                          result->source_guidance_applied);
+  if (report != nullptr) fill_desktop_report(*report, *prepared, *result);
   amt::core::report_progress(progress, 1.0);
   return std::move(result->masters);
 }

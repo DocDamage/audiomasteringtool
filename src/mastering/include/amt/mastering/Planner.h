@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "amt/analysis/DeepAnalysis.h"
 #include "amt/analysis/FileAnalyzer.h"
 #include "amt/mastering/ProcessingGraph.h"
 
@@ -25,5 +26,6 @@ struct MasteringPlan {
 };
 
 [[nodiscard]] MasteringPlan plan_mastering(const amt::analysis::Phase1AnalysisReport& report);
+[[nodiscard]] MasteringPlan plan_mastering(const amt::analysis::AnalysisReport& report);
 
 }  // namespace amt::mastering

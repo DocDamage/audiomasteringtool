@@ -25,6 +25,7 @@
     "executionProviders",
     "inputSampleRate",
     "stemTaxonomy",
+    "automaticMode1Approved",
     "onnxContract"
   ],
   "properties": {
@@ -63,6 +64,7 @@
         "enum": ["vocals", "drums", "bass", "other", "kick", "snare", "percussion", "tonal"]
       }
     },
+    "automaticMode1Approved": {"type": "boolean"},
     "onnxContract": {
       "type": "object",
       "required": [

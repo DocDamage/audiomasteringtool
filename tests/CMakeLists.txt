@@ -58,3 +58,10 @@ target_link_libraries(amt_phase5_tests PRIVATE
   amt_separation
 )
 add_test(NAME phase5_source_guided_separation_policy COMMAND amt_phase5_tests)
+
+add_executable(amt_phase5_fingerprint_tests phase5_fingerprint_tests.cpp)
+target_link_libraries(amt_phase5_fingerprint_tests PRIVATE
+  amt_core
+  amt_separation
+)
+add_test(NAME phase5_source_fingerprint_and_cache_identity COMMAND amt_phase5_fingerprint_tests)

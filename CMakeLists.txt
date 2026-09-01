@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(AudioMasteringTool VERSION 0.0.1 LANGUAGES CXX)
+project(AudioMasteringTool VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +11,7 @@ option(AMT_BUILD_BENCHMARKS "Build benchmark harness" ON)
 option(AMT_WITH_ONNX "Enable production ONNX Runtime integration" OFF)
 
 add_subdirectory(src/core)
+add_subdirectory(src/audio)
 add_subdirectory(src/codec)
 add_subdirectory(src/worker)
 add_subdirectory(src/cli)

@@ -2,6 +2,7 @@ add_library(amt_core STATIC
   src/Version.cpp
   src/AnalysisTypes.cpp
   src/InferenceBackend.cpp
+  src/FileFingerprint.cpp
 )
 target_include_directories(amt_core PUBLIC include)
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)

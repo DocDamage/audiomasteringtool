@@ -7,6 +7,7 @@ if(WIN32)
   target_link_libraries(audiomasteringtool PRIVATE
     amt_codec
     amt_analysis
+    amt_mastering
     amt_playback
     comctl32
     comdlg32

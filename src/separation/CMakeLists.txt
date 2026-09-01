@@ -7,6 +7,7 @@ add_library(amt_separation STATIC
   src/SourceIssueInference.cpp
   src/SourceGuidedWorkflow.cpp
   src/ModelRegistry.cpp
+  src/ModelArtifactInstaller.cpp
   src/WorkerSeparationProvider.cpp
   src/SourceGuidedStereoExecutor.cpp
   src/SourceGuidedStereoRenderer.cpp
@@ -19,6 +20,10 @@ target_link_libraries(amt_separation PUBLIC
   amt_codec
   amt_analysis
 )
+
+if(WIN32)
+  target_link_libraries(amt_separation PUBLIC winhttp)
+endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(amt_separation)

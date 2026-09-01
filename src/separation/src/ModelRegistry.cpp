@@ -1,6 +1,7 @@
 #include "amt/separation/ModelRegistry.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -455,6 +456,7 @@ std::optional<WorkerSeparationProviderConfig> parse_active_model(
 
   const auto id = string_member(model, "id", error);
   const auto version = string_member(model, "version", error);
+  const auto task = string_member(model, "task", error);
   const auto source = string_member(model, "source", error);
   const auto weight_provenance = string_member(model, "weightProvenance", error);
   const auto artifact_text = string_member(model, "artifact", error);
@@ -472,11 +474,16 @@ std::optional<WorkerSeparationProviderConfig> parse_active_model(
   const auto input_sample_rate = integer_member(model, "inputSampleRate", error);
   const auto providers = string_array_member(model, "executionProviders", error);
   const auto stems = string_array_member(model, "stemTaxonomy", error);
-  if (!id || !version || !source || !weight_provenance || !artifact_text || !sha256 ||
-      !runtime || !code_license || !weights_license || !commercial_reviewed ||
-      !commercial_allowed || !redistribution_reviewed || !redistribution_allowed ||
-      !attribution || !benchmark || !security || !input_sample_rate || !providers ||
-      !stems) {
+  const auto automatic_mode1_approved = bool_member(model, "automaticMode1Approved", error);
+  if (!id || !version || !task || !source || !weight_provenance || !artifact_text ||
+      !sha256 || !runtime || !code_license || !weights_license ||
+      !commercial_reviewed || !commercial_allowed || !redistribution_reviewed ||
+      !redistribution_allowed || !attribution || !benchmark || !security ||
+      !input_sample_rate || !providers || !stems || !automatic_mode1_approved) {
+    return std::nullopt;
+  }
+  if (*task != "source-separation") {
+    error = "active separation model task must be source-separation";
     return std::nullopt;
   }
   if (*runtime != "onnxruntime-worker-v1") {
@@ -536,7 +543,8 @@ std::optional<WorkerSeparationProviderConfig> parse_active_model(
   }
   if (*chunk_frames > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
       *overlap_frames > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
-      *confidence <= 0.0 || *confidence > 1.0) {
+      *confidence <= 0.0 || *confidence > 1.0 ||
+      *overlap_frames * 2U >= *chunk_frames) {
     error = "active separation model ONNX contract contains invalid bounds/confidence";
     return std::nullopt;
   }
@@ -545,6 +553,7 @@ std::optional<WorkerSeparationProviderConfig> parse_active_model(
   config.model_artifact = registry_path.parent_path() / artifact;
   config.fallback_output_root = fallback_output_root;
   config.execution_provider = "cpu";
+  config.automatic_mode1_approved = *automatic_mode1_approved;
   config.manifest.model_name = *id;
   config.manifest.model_version = *version;
   config.manifest.model_sha256 = *sha256;

@@ -1,5 +1,38 @@
 {
   "schemaVersion": 2,
-  "activeSeparationModel": null,
-  "models": []
+  "activeSeparationModel": "htdemucs-onnx-fp16weights",
+  "models": [
+    {
+      "id": "htdemucs-onnx-fp16weights",
+      "version": "d54ed9eb60e258ea82131c6ee14578628816456a",
+      "task": "source-separation",
+      "source": "StemSplitio/htdemucs-onnx converted from Meta Demucs HTDemucs",
+      "weightProvenance": "HTDemucs pretrained weights converted to ONNX FP16 weights at pinned Hugging Face revision d54ed9eb60e258ea82131c6ee14578628816456a",
+      "artifact": "htdemucs-onnx/htdemucs_fp16weights.onnx",
+      "sha256": "d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a",
+      "runtime": "onnxruntime-worker-v1",
+      "codeLicense": "MIT",
+      "weightsLicense": "MIT",
+      "commercialUseReviewed": true,
+      "commercialUse": true,
+      "redistributionReviewed": true,
+      "redistributionAllowed": true,
+      "attribution": "StemSplitio HTDemucs ONNX conversion; upstream Meta Demucs HTDemucs",
+      "ramMb": 0,
+      "vramMb": 0,
+      "securityReview": "approved",
+      "benchmarkRecord": "Pinned converter reports FP16-weight ONNX parity max-abs difference about 4.58e-5 and preserves upstream HTDemucs MUSDB18-HQ benchmark context. AudioMasteringTool automatic Mode 1 damage-rate calibration remains pending, so this package is diagnostic-only for automatic mastering.",
+      "executionProviders": ["cpu"],
+      "inputSampleRate": 44100,
+      "stemTaxonomy": ["drums", "bass", "other", "vocals"],
+      "onnxContract": {
+        "inputTensor": "mix",
+        "outputTensor": "stems",
+        "chunkFrames": 343980,
+        "overlapFrames": 11025,
+        "calibratedOutputConfidence": 0.70,
+        "completeReconstruction": false
+      }
+    }
+  ]
 }

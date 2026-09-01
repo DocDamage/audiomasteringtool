@@ -1,5 +1,6 @@
 #include "amt/mastering/ProcessingGraph.h"
 
+#include <algorithm>
 #include <iomanip>
 #include <set>
 #include <sstream>
@@ -90,6 +91,18 @@ void write_params(std::ostringstream& stream, const amt::dsp::ProcessorParams& p
 }  // namespace
 
 void ProcessingGraph::add(amt::dsp::ProcessorSpec spec) { nodes_.push_back(std::move(spec)); }
+
+bool ProcessingGraph::contains(const std::string& id) const noexcept {
+  return std::any_of(nodes_.begin(), nodes_.end(), [&](const auto& node) { return node.id == id; });
+}
+
+bool ProcessingGraph::set_bypass(const std::string& id, const bool bypass) noexcept {
+  const auto iterator = std::find_if(nodes_.begin(), nodes_.end(),
+                                     [&](const auto& node) { return node.id == id; });
+  if (iterator == nodes_.end()) return false;
+  iterator->bypass = bypass;
+  return true;
+}
 
 bool ProcessingGraph::validate(std::string& error) const {
   if (nodes_.empty()) {

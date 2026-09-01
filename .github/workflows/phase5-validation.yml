@@ -20,6 +20,7 @@ jobs:
           - phase5_reconstruction_artifact_evaluator
           - phase5_source_guided_processing_plan
           - phase5_source_control_envelopes
+          - phase5_source_guided_stereo_executor
     steps:
       - uses: actions/checkout@v4
         with:

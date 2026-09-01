@@ -1,0 +1,41 @@
+name: Phase 5 Validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-phase5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install runtime dependency
+        run: sudo apt-get update && sudo apt-get install -y libsndfile1
+      - name: Configure
+        run: cmake --preset ninja-debug
+      - name: Build
+        run: cmake --build --preset ninja-debug
+      - name: Phase 5 separation policy
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_separation_policy$' --output-on-failure
+      - name: Phase 5 fingerprint/cache identity
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_fingerprint_and_cache_identity$' --output-on-failure
+      - name: Phase 5 reconstruction contract
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_complete_reconstruction_contract$' --output-on-failure
+      - name: Phase 5 reconstruction artifact evaluator
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_reconstruction_artifact_evaluator$' --output-on-failure
+      - name: Phase 5 source-guided processing plan
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_guided_processing_plan$' --output-on-failure
+      - name: Phase 5 source-control envelopes
+        continue-on-error: true
+        run: ctest --preset ninja-debug -R '^phase5_source_control_envelopes$' --output-on-failure
+      - name: Enforce aggregate Phase 5 suite
+        run: ctest --preset ninja-debug -R '^phase5_' --output-on-failure

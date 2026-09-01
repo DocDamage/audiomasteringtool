@@ -8,6 +8,8 @@ namespace amt::codec {
 
 class SndFileCodecService final : public ICodecService {
  public:
+  struct Impl;
+
   SndFileCodecService();
   ~SndFileCodecService() override;
   SndFileCodecService(const SndFileCodecService&) = delete;
@@ -28,7 +30,6 @@ class SndFileCodecService final : public ICodecService {
       std::string& error) const override;
 
  private:
-  struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 

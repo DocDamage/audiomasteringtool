@@ -1,9 +1,11 @@
 #include "amt/codec/AudioIO.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <utility>
 
 #include "amt/audio/Resampler.h"
 
@@ -16,19 +18,27 @@ bool is_integer_format(const AudioSampleFormat format) {
   return integer_bit_depth(format) > 0;
 }
 
-void apply_tpdf_dither(amt::audio::AudioBuffer& buffer, const int target_bits) {
-  if (target_bits <= 0) return;
-  const double lsb = std::ldexp(1.0, -(target_bits - 1));
-  std::minstd_rand generator(0x41554D54U);
-  std::uniform_real_distribution<double> distribution(-0.5, 0.5);
-  for (std::size_t channel_index = 0; channel_index < buffer.channels(); ++channel_index) {
-    auto channel = buffer.channel(channel_index);
-    for (float& sample : channel) {
-      const double noise = (distribution(generator) + distribution(generator)) * lsb;
-      sample = static_cast<float>(static_cast<double>(sample) + noise);
+class TpdfDither {
+ public:
+  explicit TpdfDither(const int target_bits)
+      : lsb_(target_bits > 0 ? std::ldexp(1.0, -(target_bits - 1)) : 0.0) {}
+
+  void apply(amt::audio::AudioBuffer& buffer) {
+    if (lsb_ == 0.0) return;
+    for (std::size_t channel_index = 0; channel_index < buffer.channels(); ++channel_index) {
+      auto channel = buffer.channel(channel_index);
+      for (float& sample : channel) {
+        const double noise = (distribution_(generator_) + distribution_(generator_)) * lsb_;
+        sample = static_cast<float>(static_cast<double>(sample) + noise);
+      }
     }
   }
-}
+
+ private:
+  double lsb_{0.0};
+  std::minstd_rand generator_{0x41554D54U};
+  std::uniform_real_distribution<double> distribution_{-0.5, 0.5};
+};
 
 }  // namespace
 
@@ -90,6 +100,7 @@ bool export_audio(ICodecService& codecs, const std::filesystem::path& input,
   const int target_bits = integer_bit_depth(settings.sample_format);
   const bool should_dither = request.dither_when_reducing_integer_depth &&
                              is_integer_format(settings.sample_format) && source_bits > target_bits;
+  TpdfDither dither(should_dither ? target_bits : 0);
 
   std::int64_t consumed = 0;
   while (true) {
@@ -108,7 +119,7 @@ bool export_audio(ICodecService& codecs, const std::filesystem::path& input,
       rendered = std::move(decoded);
     }
     if (!rendered.empty()) {
-      if (should_dither) apply_tpdf_dither(rendered, target_bits);
+      dither.apply(rendered);
       if (!encoder->write(rendered, error, cancellation)) return false;
     }
     if (done) break;

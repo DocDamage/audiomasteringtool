@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <cwctype>
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <map>
 #include <random>
 #include <sstream>
 #include <string_view>
@@ -306,6 +308,172 @@ std::optional<std::int64_t> parse_int64(const std::string& value) {
   }
 }
 
+// A deliberately small JSON reader for the diagnostics sidecar. It validates
+// the complete document, retains only the fields this version owns, and skips
+// arbitrary future values recursively so newer sidecars remain readable.
+class JsonReader {
+ public:
+  struct Value {
+    enum class Type { boolean, number, string, other } type{Type::other};
+    bool boolean{false};
+    std::string text;
+  };
+
+  explicit JsonReader(const std::string& input) : input_(input) {}
+
+  bool read_object(std::map<std::string, Value>& object) {
+    skip_space();
+    if (!consume('{')) return false;
+    skip_space();
+    if (consume('}')) return at_end();
+    while (true) {
+      std::string key;
+      if (!read_string(key) || !consume_colon()) return false;
+      Value value;
+      if (!read_value(value)) return false;
+      if (!object.emplace(std::move(key), std::move(value)).second) return false;
+      skip_space();
+      if (consume('}')) return at_end();
+      if (!consume(',')) return false;
+    }
+  }
+
+ private:
+  void skip_space() {
+    while (position_ < input_.size() &&
+           std::isspace(static_cast<unsigned char>(input_[position_]))) ++position_;
+  }
+  bool at_end() { skip_space(); return position_ == input_.size(); }
+  bool consume(const char expected) {
+    skip_space();
+    if (position_ >= input_.size() || input_[position_] != expected) return false;
+    ++position_;
+    return true;
+  }
+  bool consume_colon() { return consume(':'); }
+  bool consume_literal(const std::string_view literal) {
+    if (input_.compare(position_, literal.size(), literal) != 0) return false;
+    position_ += literal.size();
+    return true;
+  }
+  bool read_string(std::string& output) {
+    skip_space();
+    if (position_ >= input_.size() || input_[position_++] != '"') return false;
+    output.clear();
+    while (position_ < input_.size()) {
+      const char character = input_[position_++];
+      if (character == '"') return true;
+      if (static_cast<unsigned char>(character) < 0x20U) return false;
+      if (character != '\\') { output.push_back(character); continue; }
+      if (position_ >= input_.size()) return false;
+      const char escaped = input_[position_++];
+      switch (escaped) {
+        case '"': output.push_back('"'); break;
+        case '\\': output.push_back('\\'); break;
+        case '/': output.push_back('/'); break;
+        case 'b': output.push_back('\b'); break;
+        case 'f': output.push_back('\f'); break;
+        case 'n': output.push_back('\n'); break;
+        case 'r': output.push_back('\r'); break;
+        case 't': output.push_back('\t'); break;
+        case 'u':
+          if (position_ + 4U > input_.size()) return false;
+          for (int index = 0; index < 4; ++index) {
+            if (hex_value(input_[position_++]) < 0) return false;
+          }
+          output += "?";  // Sidecars are UTF-8; retain validity for escaped future text.
+          break;
+        default: return false;
+      }
+    }
+    return false;
+  }
+  bool skip_number(std::string& output) {
+    skip_space();
+    const std::size_t start = position_;
+    if (position_ < input_.size() && input_[position_] == '-') ++position_;
+    const std::size_t integer_start = position_;
+    while (position_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[position_]))) ++position_;
+    if (integer_start == position_) return false;
+    if (position_ < input_.size() && input_[position_] == '.') {
+      ++position_;
+      const std::size_t fraction_start = position_;
+      while (position_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[position_]))) ++position_;
+      if (fraction_start == position_) return false;
+    }
+    if (position_ < input_.size() && (input_[position_] == 'e' || input_[position_] == 'E')) {
+      ++position_;
+      if (position_ < input_.size() && (input_[position_] == '+' || input_[position_] == '-')) ++position_;
+      const std::size_t exponent_start = position_;
+      while (position_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[position_]))) ++position_;
+      if (exponent_start == position_) return false;
+    }
+    output = input_.substr(start, position_ - start);
+    return true;
+  }
+  bool read_value(Value& value) {
+    skip_space();
+    if (position_ >= input_.size()) return false;
+    if (input_[position_] == '"') {
+      value.type = Value::Type::string;
+      return read_string(value.text);
+    }
+    if (input_[position_] == '{' || input_[position_] == '[') return skip_compound();
+    if (consume_literal("true")) { value.type = Value::Type::boolean; value.boolean = true; return true; }
+    if (consume_literal("false")) { value.type = Value::Type::boolean; value.boolean = false; return true; }
+    if (consume_literal("null")) return true;
+    value.type = Value::Type::number;
+    return skip_number(value.text);
+  }
+  bool skip_compound() {
+    const char opening = input_[position_++];
+    const char closing = opening == '{' ? '}' : ']';
+    skip_space();
+    if (consume(closing)) return true;
+    while (true) {
+      if (opening == '{') {
+        std::string ignored_key;
+        if (!read_string(ignored_key) || !consume_colon()) return false;
+      }
+      Value ignored;
+      if (!read_value(ignored)) return false;
+      skip_space();
+      if (consume(closing)) return true;
+      if (!consume(',')) return false;
+    }
+  }
+
+  const std::string& input_;
+  std::size_t position_{0U};
+};
+
+std::optional<SourceDiagnosticsRecord> read_source_diagnostics(
+    const std::filesystem::path& path) {
+  const auto json = read_text(path);
+  if (!json) return std::nullopt;
+  std::map<std::string, JsonReader::Value> fields;
+  JsonReader reader(*json);
+  if (!reader.read_object(fields)) return std::nullopt;
+  const auto schema = fields.find("schemaVersion");
+  const auto performed = fields.find("sourceDiagnosticsPerformed");
+  const auto guidance = fields.find("sourceGuidanceApplied");
+  const auto approved = fields.find("automaticMode1Approved");
+  const auto summary = fields.find("summary");
+  if (schema == fields.end() || performed == fields.end() || guidance == fields.end() ||
+      approved == fields.end() || summary == fields.end() ||
+      schema->second.type != JsonReader::Value::Type::number || schema->second.text != "1" ||
+      performed->second.type != JsonReader::Value::Type::boolean ||
+      guidance->second.type != JsonReader::Value::Type::boolean ||
+      approved->second.type != JsonReader::Value::Type::boolean ||
+      summary->second.type != JsonReader::Value::Type::string) return std::nullopt;
+  return SourceDiagnosticsRecord{.schema_version = 1,
+                                 .source_diagnostics_performed = performed->second.boolean,
+                                 .source_guidance_applied = guidance->second.boolean,
+                                 .automatic_mode1_approved = approved->second.boolean,
+                                 .summary = summary->second.text,
+                                 .json = *json};
+}
+
 std::string manifest_text(const ProjectRecord& project) {
   std::ostringstream output;
   output << std::setprecision(17)
@@ -559,6 +727,8 @@ std::optional<ProjectRecord> ProjectStore::load(const std::string& project_id,
   if (const auto analysis = read_text(directory / "analysis-v2.json")) project.analysis_json = *analysis;
   if (const auto graph = read_text(directory / "master-a-graph.json")) project.master_a_graph_json = *graph;
   if (const auto graph = read_text(directory / "master-b-graph.json")) project.master_b_graph_json = *graph;
+  project.source_diagnostics = read_source_diagnostics(
+      directory / "source-diagnostics-v1.json");
 
   if (const auto revision_text = read_text(directory / "revisions.amtlog")) {
     std::istringstream revision_lines(*revision_text);

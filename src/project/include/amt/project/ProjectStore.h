@@ -28,6 +28,18 @@ struct RevisionNode {
   std::filesystem::path output_path;
 };
 
+// Persisted Phase 5 provenance is deliberately kept outside the project
+// manifest. Loading it must therefore be read-only: opening an older project
+// cannot rewrite its history merely to restore the desktop diagnostic view.
+struct SourceDiagnosticsRecord {
+  int schema_version{1};
+  bool source_diagnostics_performed{false};
+  bool source_guidance_applied{false};
+  bool automatic_mode1_approved{false};
+  std::string summary;
+  std::string json;
+};
+
 struct ProjectRecord {
   int schema_version{1};
   std::string project_id;
@@ -42,6 +54,7 @@ struct ProjectRecord {
   std::string analysis_json;
   std::string master_a_graph_json;
   std::string master_b_graph_json;
+  std::optional<SourceDiagnosticsRecord> source_diagnostics;
   std::vector<RevisionNode> revisions;
 };
 

@@ -278,6 +278,17 @@ void update_details(AppState& state) {
          << L" LUFS\r\n";
   }
 
+  if (project.source_diagnostics) {
+    const auto& diagnostics = *project.source_diagnostics;
+    text << L"\r\nSOURCE DIAGNOSTICS (restored)\r\n"
+         << widen_utf8(diagnostics.summary) << L"\r\n"
+         << L"Source-guided stereo processing: "
+         << (diagnostics.source_guidance_applied ? L"applied" : L"not applied") << L"\r\n"
+         << L"Automatic Mode 1: "
+         << (diagnostics.automatic_mode1_approved ? L"approved" : L"calibration-gated")
+         << L"\r\n";
+  }
+
   text << L"\r\nRECENT HISTORY\r\n";
   const std::size_t first = project.revisions.size() > 8U ? project.revisions.size() - 8U : 0U;
   for (std::size_t index = first; index < project.revisions.size(); ++index) {

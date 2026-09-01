@@ -92,7 +92,26 @@ Safety gates remain intentional:
 
 See `docs/PHASE_5_ACCEPTANCE.md` for the exact acceptance checklist.
 
-## Next — Phase 6: Hierarchical Instrument Intelligence
+## Phase 6 — Hierarchical Instrument Intelligence — FOUNDATION IMPLEMENTED; MODEL ACCEPTANCE PENDING
+
+Implemented foundation:
+
+- dedicated `src/instruments` domain and CMake target
+- versioned stable taxonomy IDs, hierarchy validation, calibrated fallback, and explicit unknown state
+- time-local `InstrumentEvent` contract, event smoothing, serialization, and analysis-report v3 integration
+- replaceable detector and production-model governance contracts
+- safe CLI `instruments` / `instrument-events` commands
+- frozen corpus manifest schema/validator and documented commercially usable training route
+
+Still required for Phase 6 acceptance: a legally reviewed ONNX detector, real frozen-corpus evaluation/calibration results, detector inference integration, desktop summary, and Windows acceptance evidence.
+
+## Phase 7 — Interaction Engine — FOUNDATION IMPLEMENTED; REPAIR ACCEPTANCE PENDING
+
+Implemented foundation: reusable pairwise interaction evidence, kick/808-ready masking/onset/phase/mono metrics, bounded repair recommendations, and before/after damage guard.
+
+Still required for Phase 7 acceptance: real audio feature/render integration driven by validated identities and blind listening evaluation with predefined damage-rate limits.
+
+## Next production capability — Phase 6 model acceptance
 
 After Phase 5 runtime acceptance:
 

@@ -273,6 +273,42 @@ void test_revision_id_uniqueness() {
   std::filesystem::remove_all(root, ignored);
 }
 
+void test_source_diagnostics_sidecar_restore() {
+  const auto root = std::filesystem::temp_directory_path() / "amt-phase5-sidecar-restore-tests";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+
+  amt::project::ProjectStore store(root);
+  std::string error;
+  auto project = store.create(root / "restore.wav", error);
+  assert(error.empty());
+  const auto sidecar = root / project.project_id / "source-diagnostics-v1.json";
+  {
+    std::ofstream output(sidecar, std::ios::binary | std::ios::trunc);
+    output << R"({"schemaVersion":1,"sourceDiagnosticsPerformed":true,"sourceGuidanceApplied":false,"automaticMode1Approved":false,"summary":"Diagnostics retained canonical stereo.","future":{"extra":[true,2]}})";
+  }
+  const auto before = read_text_file(sidecar);
+  const auto restored = store.load(project.project_id, error);
+  assert(restored.has_value());
+  assert(restored->source_diagnostics.has_value());
+  assert(restored->source_diagnostics->source_diagnostics_performed);
+  assert(!restored->source_diagnostics->source_guidance_applied);
+  assert(!restored->source_diagnostics->automatic_mode1_approved);
+  assert(restored->source_diagnostics->summary == "Diagnostics retained canonical stereo.");
+  assert(restored->source_diagnostics->json == before);
+  assert(read_text_file(sidecar) == before);
+
+  {
+    std::ofstream output(sidecar, std::ios::binary | std::ios::trunc);
+    output << R"({"schemaVersion":1,"sourceDiagnosticsPerformed":true)";
+  }
+  const auto malformed = store.load(project.project_id, error);
+  assert(malformed.has_value());
+  assert(!malformed->source_diagnostics.has_value());
+
+  std::filesystem::remove_all(root, ignored);
+}
+
 void test_export_recipes() {
   const auto& recipes = amt::project::builtin_export_recipes();
   assert(recipes.size() >= 6U);
@@ -323,6 +359,7 @@ int main() {
   test_reanalysis_invalidates_only_current_candidates();
   test_selection_history_and_stale_snapshot_merge();
   test_revision_id_uniqueness();
+  test_source_diagnostics_sidecar_restore();
   test_export_recipes();
   return 0;
 }

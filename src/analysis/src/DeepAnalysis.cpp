@@ -1,4 +1,5 @@
 #include "amt/analysis/DeepAnalysis.h"
+#include "amt/instruments/InstrumentSerialization.h"
 
 #include <algorithm>
 #include <cmath>
@@ -393,7 +394,9 @@ std::string analysis_report_to_json(const AnalysisReport& report) {
            << ",\"energy_dbfs\":" << section.energy_dbfs << ",\"label_hint\":\""
            << escape_json(section.label_hint) << "\",\"confidence\":" << section.confidence << "}";
   }
-  stream << "],\"findings\":[";
+  stream << "],\"instrument_events\":"
+         << amt::instruments::instrument_events_to_json(report.instrument_events)
+         << ",\"findings\":[";
   for (std::size_t index = 0U; index < report.findings.size(); ++index) {
     if (index != 0U) stream << ',';
     const auto& finding = report.findings[index];

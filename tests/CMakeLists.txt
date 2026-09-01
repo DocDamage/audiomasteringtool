@@ -52,6 +52,14 @@ target_link_libraries(amt_phase4_tests PRIVATE
 )
 add_test(NAME phase4_project_history_and_export_recipes COMMAND amt_phase4_tests)
 
+add_executable(amt_phase6_instruments_tests phase6_instruments_tests.cpp)
+target_link_libraries(amt_phase6_instruments_tests PRIVATE amt_core amt_instruments)
+add_test(NAME phase6_instrument_taxonomy_and_inference COMMAND amt_phase6_instruments_tests)
+
+add_executable(amt_phase7_interactions_tests phase7_interactions_tests.cpp)
+target_link_libraries(amt_phase7_interactions_tests PRIVATE amt_core amt_interactions)
+add_test(NAME phase7_interaction_evidence_and_damage_guard COMMAND amt_phase7_interactions_tests)
+
 add_executable(amt_phase5_tests phase5_tests.cpp)
 target_link_libraries(amt_phase5_tests PRIVATE
   amt_core
@@ -187,6 +195,9 @@ if(Python3_Interpreter_FOUND)
   add_test(
     NAME phase5_model_registry_python_validation
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/validate_model_registry.py")
+  add_test(
+    NAME phase6_instrument_corpus_manifest_validation
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/phase6_instrument_manifest_tests.py")
   set_tests_properties(
     phase5_calibration_tooling
     phase5_model_registry_python_validation

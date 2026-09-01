@@ -17,6 +17,7 @@
 #include "amt/mastering/OfflineRenderer.h"
 #include "amt/mastering/Planner.h"
 #include "amt/mastering/SourceGuidedCalibration.h"
+#include "amt/instruments/InstrumentSerialization.h"
 #include "amt/playback/ComparisonTransport.h"
 #include "amt/playback/Transport.h"
 
@@ -29,6 +30,8 @@ void usage() {
             << "  amt_cli probe <input>\n"
             << "  amt_cli analyze <input>\n"
             << "  amt_cli deep-analyze <input> [--json]\n"
+            << "  amt_cli instruments <input> [--json]\n"
+            << "  amt_cli instrument-events <input> [--json]\n"
             << "  amt_cli plan <input>\n"
             << "  amt_cli master <input> <output-directory> [--bits 16|24|32|float]\n"
             << "  amt_cli calibrate-source-guidance <input> <output-directory>"
@@ -223,6 +226,30 @@ int main(int argc, char** argv) {
     }
     if (argc == 4) std::cout << amt::analysis::analysis_report_to_json(*report) << '\n';
     else print_deep_analysis(*report);
+    return 0;
+  }
+
+  if ((command == "instruments" || command == "instrument-events") &&
+      (argc == 3 || argc == 4)) {
+    if (argc == 4 && std::string(argv[3]) != "--json") {
+      usage();
+      return 2;
+    }
+    const auto report = amt::analysis::analyze_track(codecs, argv[2], error);
+    if (!report) {
+      std::cerr << "instrument analysis failed: " << error << '\n';
+      return 1;
+    }
+    if (argc == 4) {
+      std::cout << amt::instruments::instrument_events_to_json(report->instrument_events) << '\n';
+    } else if (report->instrument_events.empty()) {
+      std::cout << "No approved calibrated instrument detector is configured; no exact instrument claims were made.\n";
+    } else {
+      for (const auto& event : report->instrument_events) {
+        std::cout << event.display_label << " confidence=" << event.confidence << " range="
+                  << event.start_seconds << '-' << event.end_seconds << "s\n";
+      }
+    }
     return 0;
   }
 

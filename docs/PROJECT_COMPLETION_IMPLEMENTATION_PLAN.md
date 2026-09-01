@@ -323,6 +323,10 @@ Do not start production Phase 6 integration until the Phase 5 acceptance documen
 
 # 6. Phase 6 — Hierarchical Instrument Intelligence v1
 
+## Implementation status (2026-09)
+
+The repository now contains the Phase 6 safety foundation: `src/instruments`, a validated stable taxonomy, time-local event contract, hierarchical confidence fallback/unknown behavior, detector/model-governance contracts, analysis-report serialization, CLI output, and frozen-corpus manifest validation. It does **not** yet contain a production-approved detector or its evaluation evidence, so exact instrument events remain empty by default and Phase 6 is not accepted.
+
 Target milestone: `0.6`
 
 This is the next major product capability.
@@ -763,6 +767,10 @@ Useful for model evaluation and regression tests without the GUI.
 ---
 
 # 7. Phase 7 — Kick/808 + Instrument Interaction Engine
+
+## Implementation status (2026-09)
+
+The repository now contains `src/interactions` with general pairwise interaction evidence, kick/808-ready masking/onset/phase/mono metrics, bounded repair recommendations, and damage guards. It does **not** yet connect real approved detector output to rendering or contain blind listening evidence, so Phase 7 is not accepted.
 
 Target milestone: `0.7`
 
@@ -2120,7 +2128,7 @@ These are the next concrete tasks in order.
 - [ ] Verify missing/corrupt model fallback.
 - [ ] Verify cancellation cleanup.
 - [ ] Verify diagnostic sidecar persistence.
-- [ ] Implement diagnostic sidecar reload on project reopen.
+- [x] Implement diagnostic sidecar reload on project reopen.
 
 ## Architecture cleanup
 
@@ -2133,14 +2141,14 @@ These are the next concrete tasks in order.
 
 ## Phase 6 foundation
 
-- [ ] Add `src/instruments` target.
-- [ ] Implement taxonomy schema and validation.
-- [ ] Implement stable instrument IDs and parent hierarchy.
-- [ ] Add `InstrumentEvent` contract.
-- [ ] Add instrument detector provider abstraction.
+- [x] Add `src/instruments` target.
+- [x] Implement taxonomy schema and validation.
+- [x] Implement stable instrument IDs and parent hierarchy.
+- [x] Add `InstrumentEvent` contract.
+- [x] Add instrument detector provider abstraction.
 - [ ] Extend model registry schema for instrument model capability.
 - [ ] Create `ml/instruments` evaluation/training structure.
-- [ ] Define frozen Phase 6 evaluation corpus manifest.
+- [x] Define frozen Phase 6 evaluation corpus manifest.
 - [ ] Benchmark candidate instrument models.
 - [ ] Complete model license/provenance review.
 - [ ] Implement time-local inference windows.

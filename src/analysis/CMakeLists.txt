@@ -26,6 +26,6 @@ add_library(amt_analysis STATIC
   src/DeepAnalysis.cpp
 )
 target_include_directories(amt_analysis PUBLIC include PRIVATE ${libebur128_SOURCE_DIR}/ebur128)
-target_link_libraries(amt_analysis PUBLIC amt_audio amt_codec PRIVATE ebur128)
+target_link_libraries(amt_analysis PUBLIC amt_audio amt_codec amt_instruments PRIVATE ebur128)
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(amt_analysis)

@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "required": ["corpus_id", "split", "item_id", "audio_sha256", "labels", "license_provenance"],
+  "rules": ["test identities must not overlap train or validation", "unknown/negative examples are mandatory", "audio is referenced by hash and is not committed here"]
+}

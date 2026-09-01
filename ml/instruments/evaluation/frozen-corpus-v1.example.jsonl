@@ -1,0 +1,2 @@
+{"corpus_id":"openmic-2018","split":"test","item_id":"example","audio_sha256":"REPLACE_WITH_SHA256","labels":["kick"],"license_provenance":"CC-BY-4.0; attribution captured in source manifest","artist_group":"REPLACE_WITH_SOURCE_GROUP","usage":"evaluation"}
+{"corpus_id":"slakh2100","split":"test","item_id":"example","audio_sha256":"REPLACE_WITH_SHA256","labels":["sub_808"],"license_provenance":"CC-BY-4.0; attribution captured in source manifest","artist_group":"synthetic-track-group","usage":"evaluation"}

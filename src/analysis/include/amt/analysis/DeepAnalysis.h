@@ -12,6 +12,7 @@
 #include "amt/analysis/StructuralAnalyzer.h"
 #include "amt/codec/AudioIO.h"
 #include "amt/core/JobControl.h"
+#include "amt/instruments/InstrumentEvent.h"
 
 namespace amt::analysis {
 
@@ -49,13 +50,15 @@ struct MixHealthAssessment {
 };
 
 struct AnalysisReport {
-  int schema_version{2};
+  int schema_version{3};
   Phase1AnalysisReport technical;
   StructuralMetrics structural;
   PerceptualMetrics perceptual;
   CharacterMetrics character;
   MixHealthAssessment mix_health;
   std::vector<AnalysisFinding> findings;
+  // Empty is valid until a legally reviewed/calibrated detector is configured.
+  std::vector<amt::instruments::InstrumentEvent> instrument_events;
 };
 
 [[nodiscard]] std::optional<AnalysisReport> analyze_track(

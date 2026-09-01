@@ -17,9 +17,10 @@ struct WorkerSeparationModelContract {
   std::size_t chunk_frames{262144U};
   std::size_t overlap_frames{16384U};
 
-  // Conservative prior for source-estimate trust. This is intentionally not called
-  // calibrated confidence until AudioMasteringTool's own corpus calibration exists.
-  double model_confidence_prior{0.0};
+  // Compatibility name retained during Phase 5. Until AudioMasteringTool's own
+  // corpus calibration exists this value is treated as a conservative model
+  // confidence prior, not proof that automatic intervention is safe.
+  double calibrated_output_confidence{0.0};
   bool complete_reconstruction{false};
 };
 

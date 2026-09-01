@@ -18,6 +18,15 @@ from pathlib import Path
 from typing import Any
 
 AUDIO_EXTENSIONS = {".wav", ".wave", ".aif", ".aiff", ".flac"}
+CANDIDATE_FLAGS = (
+    "artifactAudible",
+    "transientDamage",
+    "lowEndImproved",
+    "monoCompatibilityWorse",
+    "stereoImageWorse",
+    "sectionConsistencyWorse",
+    "tonalSideEffect",
+)
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -52,6 +61,10 @@ def stable_trial_id(manifest: Path, source: str, model: str, version: str) -> st
 def copy_candidate(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+
+
+def blank_candidate_rating() -> dict[str, bool]:
+    return {flag: False for flag in CANDIDATE_FLAGS}
 
 
 def main() -> int:
@@ -111,13 +124,8 @@ def main() -> int:
                 "category": "",
                 "alreadyGood": False,
                 "blindPreference": "",
-                "artifactAudible": False,
-                "transientDamage": False,
-                "lowEndImproved": False,
-                "monoCompatibilityWorse": False,
-                "stereoImageWorse": False,
-                "sectionConsistencyWorse": False,
-                "tonalSideEffect": False,
+                "A": blank_candidate_rating(),
+                "B": blank_candidate_rating(),
                 "notes": "",
             })
 
@@ -137,7 +145,9 @@ def main() -> int:
             "For each trial folder, compare A and B at matched playback level.\n"
             "Do not inspect file metadata or the private blind-key.json.\n"
             "Fill one responses.jsonl record per trial. blindPreference must be A, B, or tie.\n"
-            "Set damage/side-effect flags only when you can hear the problem reliably.\n",
+            "Score the A and B candidate flags separately. Do not guess which one is guided.\n"
+            "Set damage/side-effect flags only when you can hear the problem reliably.\n"
+            "lowEndImproved is a positive flag; the others describe audible damage/side effects.\n",
             encoding="utf-8",
         )
 

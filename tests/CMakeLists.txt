@@ -128,6 +128,17 @@ target_link_libraries(amt_phase5_model_registry_tests PRIVATE
 )
 add_test(NAME phase5_production_model_registry COMMAND amt_phase5_model_registry_tests)
 
+add_executable(amt_phase5_model_artifact_installer_tests
+  phase5_model_artifact_installer_tests.cpp)
+target_link_libraries(amt_phase5_model_artifact_installer_tests PRIVATE
+  amt_core
+  amt_codec
+  amt_analysis
+  amt_separation
+)
+add_test(NAME phase5_trusted_model_artifact_installer
+  COMMAND amt_phase5_model_artifact_installer_tests)
+
 add_executable(amt_phase5_source_guided_executor_tests phase5_source_guided_executor_tests.cpp)
 target_link_libraries(amt_phase5_source_guided_executor_tests PRIVATE
   amt_core

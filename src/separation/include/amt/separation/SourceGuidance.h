@@ -30,6 +30,7 @@ struct SourceGuidanceConfig {
   SeparationPolicyConfig policy;
   bool require_bundled_production_model_eligibility{true};
   bool enable_cache{true};
+  bool compute_missing_source_fingerprint{true};
 };
 
 struct SourceGuidanceResult {

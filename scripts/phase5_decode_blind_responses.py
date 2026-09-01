@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Decode locked A/B listener responses using a private Phase 5 blind key.
 
-Output JSONL is directly consumable by `phase5_mode1_calibration.py`.
+Output JSONL is directly consumable by `phase5_mode1_calibration.py`. Candidate
+ratings are collected independently while blinded; after responses are locked,
+this decoder selects the ratings that belong to the hidden guided candidate.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-DAMAGE_FLAGS = (
+CANDIDATE_FLAGS = (
     "artifactAudible",
     "transientDamage",
     "lowEndImproved",
@@ -47,6 +49,18 @@ def load_key(path: Path) -> dict[str, dict[str, Any]]:
     return result
 
 
+def validate_candidate_rating(value: Any, label: str, line_number: int) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        raise ValueError(f"line {line_number}: candidate {label} rating must be an object")
+    output: dict[str, bool] = {}
+    for flag in CANDIDATE_FLAGS:
+        flag_value = value.get(flag)
+        if not isinstance(flag_value, bool):
+            raise ValueError(f"line {line_number}: {label}.{flag} must be boolean")
+        output[flag] = flag_value
+    return output
+
+
 def load_responses(path: Path) -> list[dict[str, Any]]:
     responses: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -72,9 +86,8 @@ def load_responses(path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f"line {line_number}: category must be filled in")
             if not isinstance(parsed.get("alreadyGood"), bool):
                 raise ValueError(f"line {line_number}: alreadyGood must be boolean")
-            for flag in DAMAGE_FLAGS:
-                if not isinstance(parsed.get(flag), bool):
-                    raise ValueError(f"line {line_number}: {flag} must be boolean")
+            parsed["A"] = validate_candidate_rating(parsed.get("A"), "A", line_number)
+            parsed["B"] = validate_candidate_rating(parsed.get("B"), "B", line_number)
             responses.append(parsed)
     if not responses:
         raise ValueError("response file is empty")
@@ -85,6 +98,14 @@ def decoded_preference(preference: str, key: dict[str, Any]) -> str:
     if preference == "tie":
         return "tie"
     return key[preference]
+
+
+def guided_candidate_label(key: dict[str, Any]) -> str:
+    if key["A"] == "guided":
+        return "A"
+    if key["B"] == "guided":
+        return "B"
+    raise ValueError("blind key has no guided candidate")
 
 
 def main() -> int:
@@ -104,19 +125,21 @@ def main() -> int:
             trial = key.get(trial_id)
             if trial is None:
                 raise ValueError(f"response trial is missing from blind key: {trial_id}")
+            guided_label = guided_candidate_label(trial)
+            guided_rating = response[guided_label]
             decoded.append({
                 "trackId": trial_id,
                 "category": response["category"],
                 "alreadyGood": response["alreadyGood"],
                 "sourceGuidanceApplied": True,
                 "blindPreference": decoded_preference(response["blindPreference"], trial),
-                "artifactAudible": response["artifactAudible"],
-                "transientDamage": response["transientDamage"],
-                "lowEndImproved": response["lowEndImproved"],
-                "monoCompatibilityWorse": response["monoCompatibilityWorse"],
-                "stereoImageWorse": response["stereoImageWorse"],
-                "sectionConsistencyWorse": response["sectionConsistencyWorse"],
-                "tonalSideEffect": response["tonalSideEffect"],
+                "artifactAudible": guided_rating["artifactAudible"],
+                "transientDamage": guided_rating["transientDamage"],
+                "lowEndImproved": guided_rating["lowEndImproved"],
+                "monoCompatibilityWorse": guided_rating["monoCompatibilityWorse"],
+                "stereoImageWorse": guided_rating["stereoImageWorse"],
+                "sectionConsistencyWorse": guided_rating["sectionConsistencyWorse"],
+                "tonalSideEffect": guided_rating["tonalSideEffect"],
                 "notes": response.get("notes", ""),
                 "modelName": trial.get("modelName", ""),
                 "modelVersion": trial.get("modelVersion", ""),

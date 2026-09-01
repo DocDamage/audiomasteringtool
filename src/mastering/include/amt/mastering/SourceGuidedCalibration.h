@@ -29,6 +29,11 @@ struct SourceGuidedCalibrationResult {
       amt::separation::SeparationMode::stereo_mastering};
   std::filesystem::path stereo_master_a;
   std::filesystem::path guided_master_a;
+  std::filesystem::path stereo_blind_audition;
+  std::filesystem::path guided_blind_audition;
+  double audition_reference_lufs{-80.0};
+  double stereo_audition_gain_db{0.0};
+  double guided_audition_gain_db{0.0};
   std::filesystem::path manifest_path;
   std::string model_name;
   std::string model_version;
@@ -41,7 +46,9 @@ struct SourceGuidedCalibrationResult {
 // bypasses only the registry's automaticMode1Approved product gate so the exact
 // candidate that would be considered for automatic use can be evaluated blindly.
 // It does not weaken the source-evidence policy, canonical-stereo constraint, or
-// bounded source-guided processing limits.
+// bounded source-guided processing limits. When both candidates exist, it also
+// writes attenuation-only loudness-matched float WAV audition copies so blind
+// listening cannot reward the louder candidate.
 [[nodiscard]] std::optional<SourceGuidedCalibrationResult>
 render_source_guided_calibration_pair(
     amt::codec::ICodecService& codecs,

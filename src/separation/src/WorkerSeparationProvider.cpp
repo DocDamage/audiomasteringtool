@@ -3,14 +3,15 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <optional>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -28,14 +29,31 @@ namespace {
 
 std::atomic<std::uint64_t> g_worker_output_counter{0U};
 
-[[nodiscard]] std::string lower_ascii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char c) {
-    return static_cast<char>(std::tolower(c));
+[[nodiscard]] char ascii_lower(const char value) noexcept {
+  if (value >= 'A' && value <= 'Z') {
+    return static_cast<char>(value - 'A' + 'a');
+  }
+  return value;
+}
+
+[[nodiscard]] bool ascii_equal_ignore_case(const std::string_view first,
+                                           const std::string_view second) noexcept {
+  if (first.size() != second.size()) return false;
+  for (std::size_t index = 0U; index < first.size(); ++index) {
+    if (ascii_lower(first[index]) != ascii_lower(second[index])) return false;
+  }
+  return true;
+}
+
+[[nodiscard]] std::string lower_ascii_copy(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](const char c) {
+    return ascii_lower(c);
   });
   return value;
 }
 
-[[nodiscard]] bool valid_contract(const WorkerSeparationProviderConfig& config) noexcept {
+[[nodiscard]] bool valid_contract(
+    const WorkerSeparationProviderConfig& config) noexcept {
   if (config.worker_executable.empty() || config.model_artifact.empty() ||
       config.manifest.model_name.empty() || config.manifest.model_version.empty() ||
       config.manifest.model_sha256.size() != 64U ||
@@ -69,13 +87,16 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
     }
   }
 
-  const auto provider = lower_ascii(config.execution_provider);
-  if (provider != "cpu" && provider != "cuda") return false;
-  const bool declared = std::any_of(
+  if (!ascii_equal_ignore_case(config.execution_provider, "cpu") &&
+      !ascii_equal_ignore_case(config.execution_provider, "cuda")) {
+    return false;
+  }
+  return std::any_of(
       config.manifest.supported_execution_providers.begin(),
       config.manifest.supported_execution_providers.end(),
-      [&](const std::string& value) { return lower_ascii(value) == provider; });
-  return declared;
+      [&](const std::string& value) {
+        return ascii_equal_ignore_case(value, config.execution_provider);
+      });
 }
 
 [[nodiscard]] bool role_is_supported(const SeparationModelManifest& manifest,
@@ -99,7 +120,9 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
               stem_role_name(role);
       return {};
     }
-    if (std::find(roles.begin(), roles.end(), role) == roles.end()) roles.push_back(role);
+    if (std::find(roles.begin(), roles.end(), role) == roles.end()) {
+      roles.push_back(role);
+    }
   }
   return roles;
 }
@@ -114,8 +137,7 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
 }
 
 [[nodiscard]] std::filesystem::path fallback_output_directory(
-    const WorkerSeparationProviderConfig& config,
-    const SeparationRequest& request) {
+    const WorkerSeparationProviderConfig& config) {
   auto root = config.fallback_output_root;
   if (root.empty()) {
     root = std::filesystem::temp_directory_path() / "AudioMasteringTool" /
@@ -123,9 +145,7 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
   }
   const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
   const auto sequence = g_worker_output_counter.fetch_add(1U, std::memory_order_relaxed);
-  auto stem = request.source_path.stem().string();
-  if (stem.empty()) stem = "source";
-  return root / (stem + "-" + std::to_string(ticks) + "-" +
+  return root / ("estimate-" + std::to_string(ticks) + "-" +
                  std::to_string(sequence));
 }
 
@@ -205,7 +225,8 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::string> final_worker_json(const std::string& output) {
+[[nodiscard]] std::optional<std::string> final_worker_json(
+    const std::string& output) {
   const auto success = output.rfind("{\"ok\":true");
   const auto failure = output.rfind("{\"ok\":false");
   const auto position = success == std::string::npos
@@ -216,6 +237,15 @@ std::atomic<std::uint64_t> g_worker_output_counter{0U};
   return output.substr(position, line_end == std::string::npos
                                      ? std::string::npos
                                      : line_end - position);
+}
+
+[[nodiscard]] std::optional<int> latest_worker_progress(
+    const std::string& output) {
+  const auto position = output.rfind("{\"progress\":");
+  if (position == std::string::npos) return std::nullopt;
+  const auto value = extract_int64(output.substr(position), "progress");
+  if (!value || *value < 0 || *value > 100) return std::nullopt;
+  return static_cast<int>(*value);
 }
 
 #ifdef _WIN32
@@ -246,14 +276,20 @@ struct UniqueHandle {
 };
 
 [[nodiscard]] std::wstring wide_utf8(const std::string& text) {
-  if (text.empty()) return {};
-  const int required = MultiByteToWideChar(CP_UTF8, 0, text.data(),
-                                            static_cast<int>(text.size()),
-                                            nullptr, 0);
+  if (text.empty() ||
+      text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return {};
+  }
+  const int required = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+      nullptr, 0);
   if (required <= 0) return {};
   std::wstring output(static_cast<std::size_t>(required), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
-                      output.data(), required);
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                          static_cast<int>(text.size()), output.data(),
+                          required) != required) {
+    return {};
+  }
   return output;
 }
 
@@ -281,10 +317,21 @@ struct UniqueHandle {
   return output;
 }
 
-[[nodiscard]] std::wstring worker_command_line(
+[[nodiscard]] std::optional<std::wstring> worker_command_line(
     const WorkerSeparationProviderConfig& config,
     const SeparationRequest& request,
-    const std::filesystem::path& output_directory) {
+    const std::filesystem::path& output_directory,
+    std::string& error) {
+  const auto stems = wide_utf8(stem_csv(config.manifest));
+  const auto provider = wide_utf8(lower_ascii_copy(config.execution_provider));
+  const auto input_tensor = wide_utf8(config.contract.input_tensor_name);
+  const auto output_tensor = wide_utf8(config.contract.output_tensor_name);
+  if (stems.empty() || provider.empty() || input_tensor.empty() ||
+      output_tensor.empty()) {
+    error = "separation worker contract contains invalid UTF-8 text";
+    return std::nullopt;
+  }
+
   std::vector<std::wstring> arguments{
       config.worker_executable.wstring(),
       L"--separate-onnx",
@@ -292,10 +339,10 @@ struct UniqueHandle {
       L"--source", request.source_path.wstring(),
       L"--output", output_directory.wstring(),
       L"--sample-rate", std::to_wstring(config.manifest.expected_input_sample_rate),
-      L"--stems", wide_utf8(stem_csv(config.manifest)),
-      L"--provider", wide_utf8(lower_ascii(config.execution_provider)),
-      L"--input-tensor", wide_utf8(config.contract.input_tensor_name),
-      L"--output-tensor", wide_utf8(config.contract.output_tensor_name),
+      L"--stems", stems,
+      L"--provider", provider,
+      L"--input-tensor", input_tensor,
+      L"--output-tensor", output_tensor,
       L"--chunk-frames", std::to_wstring(config.contract.chunk_frames),
       L"--overlap-frames", std::to_wstring(config.contract.overlap_frames)};
 
@@ -339,6 +386,16 @@ bool drain_pipe(HANDLE pipe,
   }
 }
 
+void report_worker_progress(const std::string& output,
+                            int& last_progress,
+                            const amt::core::ProgressCallback& progress) {
+  const auto worker_progress = latest_worker_progress(output);
+  if (!worker_progress || *worker_progress <= last_progress) return;
+  last_progress = *worker_progress;
+  const double fraction = static_cast<double>(*worker_progress) / 100.0;
+  amt::core::report_progress(progress, 0.12 + fraction * 0.76);
+}
+
 std::optional<std::string> run_worker_process(
     const WorkerSeparationProviderConfig& config,
     const SeparationRequest& request,
@@ -358,7 +415,10 @@ std::optional<std::string> run_worker_process(
   }
   UniqueHandle read_pipe(raw_read);
   UniqueHandle write_pipe(raw_write);
-  SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0U);
+  if (!SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0U)) {
+    error = "unable to secure the separation worker output pipe";
+    return std::nullopt;
+  }
 
   STARTUPINFOW startup{};
   startup.cb = sizeof(startup);
@@ -368,11 +428,12 @@ std::optional<std::string> run_worker_process(
   startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
   PROCESS_INFORMATION process_info{};
-  auto command = worker_command_line(config, request, output_directory);
+  auto command = worker_command_line(config, request, output_directory, error);
+  if (!command) return std::nullopt;
   const auto application = config.worker_executable.wstring();
   const auto working_directory = config.worker_executable.parent_path().wstring();
   const BOOL created = CreateProcessW(
-      application.c_str(), command.data(), nullptr, nullptr, TRUE,
+      application.c_str(), command->data(), nullptr, nullptr, TRUE,
       CREATE_NO_WINDOW, nullptr,
       working_directory.empty() ? nullptr : working_directory.c_str(),
       &startup, &process_info);
@@ -387,6 +448,7 @@ std::optional<std::string> run_worker_process(
   amt::core::report_progress(progress, 0.12);
 
   std::string worker_output;
+  int last_progress = -1;
   const auto started = std::chrono::steady_clock::now();
   while (true) {
     if (!drain_pipe(read_pipe.get(), worker_output,
@@ -395,6 +457,8 @@ std::optional<std::string> run_worker_process(
       WaitForSingleObject(process.get(), 5000U);
       return std::nullopt;
     }
+    report_worker_progress(worker_output, last_progress, progress);
+
     if (cancellation != nullptr && cancellation->is_cancelled()) {
       TerminateProcess(process.get(), 121U);
       WaitForSingleObject(process.get(), 5000U);
@@ -414,6 +478,7 @@ std::optional<std::string> run_worker_process(
     if (wait == WAIT_FAILED) {
       error = "waiting for the separation worker failed";
       TerminateProcess(process.get(), 123U);
+      WaitForSingleObject(process.get(), 5000U);
       return std::nullopt;
     }
   }
@@ -422,6 +487,7 @@ std::optional<std::string> run_worker_process(
                   config.maximum_worker_output_bytes, error)) {
     return std::nullopt;
   }
+  report_worker_progress(worker_output, last_progress, progress);
 
   DWORD exit_code = 0U;
   if (!GetExitCodeProcess(process.get(), &exit_code)) {
@@ -507,7 +573,9 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
 #else
   auto roles = selected_roles(request, config_.manifest, error);
   if (roles.empty()) {
-    if (error.empty()) error = "worker separation request selected no usable source roles";
+    if (error.empty()) {
+      error = "worker separation request selected no usable source roles";
+    }
     return std::nullopt;
   }
 
@@ -526,13 +594,14 @@ std::optional<SeparationResult> WorkerSeparationProvider::separate(
     }
     return std::nullopt;
   }
-  if (lower_ascii(fingerprint->sha256) != lower_ascii(config_.manifest.model_sha256)) {
+  if (!ascii_equal_ignore_case(fingerprint->sha256,
+                               config_.manifest.model_sha256)) {
     error = "separation model artifact SHA-256 does not match the approved manifest";
     return std::nullopt;
   }
 
   const auto output_directory = request.cache_directory.empty()
-      ? fallback_output_directory(config_, request)
+      ? fallback_output_directory(config_)
       : request.cache_directory;
   std::error_code directory_error;
   std::filesystem::create_directories(output_directory, directory_error);

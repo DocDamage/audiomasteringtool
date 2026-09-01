@@ -16,7 +16,10 @@ struct WorkerSeparationModelContract {
   std::string output_tensor_name{"stems"};
   std::size_t chunk_frames{262144U};
   std::size_t overlap_frames{16384U};
-  double calibrated_output_confidence{0.0};
+
+  // Conservative prior for source-estimate trust. This is intentionally not called
+  // calibrated confidence until AudioMasteringTool's own corpus calibration exists.
+  double model_confidence_prior{0.0};
   bool complete_reconstruction{false};
 };
 
@@ -27,6 +30,12 @@ struct WorkerSeparationProviderConfig {
   SeparationModelManifest manifest;
   WorkerSeparationModelContract contract;
   std::string execution_provider{"cpu"};
+
+  // A model may be installed and used for diagnostic evidence while automatic
+  // source-guided audio changes remain gated off. Flip only after app-specific
+  // damage-rate/listening calibration approves the model+inference configuration.
+  bool automatic_mode1_approved{false};
+
   std::size_t maximum_worker_output_bytes{64U * 1024U};
   std::uint64_t maximum_runtime_seconds{1800U};
 };

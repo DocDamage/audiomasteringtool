@@ -18,7 +18,7 @@ required = {
     "runtime", "codeLicense", "weightsLicense", "commercialUseReviewed",
     "commercialUse", "redistributionReviewed", "redistributionAllowed", "attribution",
     "ramMb", "vramMb", "securityReview", "benchmarkRecord", "executionProviders",
-    "inputSampleRate", "stemTaxonomy", "onnxContract"
+    "inputSampleRate", "stemTaxonomy", "automaticMode1Approved", "onnxContract"
 }
 allowed_stems = {
     "vocals", "drums", "bass", "other", "kick", "snare", "percussion", "tonal"
@@ -48,7 +48,8 @@ for model in data["models"]:
     assert ".." not in artifact.parts, f"model {model_id} artifact must stay inside models/"
 
     for field in ("commercialUseReviewed", "commercialUse",
-                  "redistributionReviewed", "redistributionAllowed"):
+                  "redistributionReviewed", "redistributionAllowed",
+                  "automaticMode1Approved"):
         assert isinstance(model[field], bool), f"model {model_id} {field} must be boolean"
     assert model["securityReview"] in {"pending", "approved", "rejected"}, \
         f"model {model_id} has invalid securityReview"

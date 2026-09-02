@@ -22,3 +22,4 @@ CMakeUserPresets.json
 *.ogg
 *.opus
 models/cache/
+dist/

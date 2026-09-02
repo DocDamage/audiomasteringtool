@@ -23,6 +23,11 @@
 #include <vector>
 
 #include "amt/analysis/DeepAnalysis.h"
+#include "amt/batch/BatchExport.h"
+#include "amt/batch/BatchProject.h"
+#include "amt/batch/BatchQueue.h"
+#include "amt/batch/CohesionPlanner.h"
+#include "amt/batch/CollectionAnalysis.h"
 #include "amt/codec/AudioIO.h"
 #include "amt/codec/SndFileCodec.h"
 #include "amt/core/JobControl.h"
@@ -34,6 +39,16 @@
 #include "amt/playback/Transport.h"
 #include "amt/project/ExportRecipes.h"
 #include "amt/project/ProjectStore.h"
+#include "amt/revision/ConstraintResolver.h"
+#include "amt/revision/PlanEditor.h"
+#include "amt/revision/RevisionExplanation.h"
+#include "amt/revision/RevisionParser.h"
+#include "amt/settings/CacheManager.h"
+#include "amt/settings/ModelManager.h"
+#include "amt/settings/SettingsManager.h"
+#include "amt/translation/PlaybackClass.h"
+#include "amt/translation/TranslationAnalyzer.h"
+#include "amt/translation/TranslationModel.h"
 
 namespace {
 
@@ -44,6 +59,8 @@ constexpr UINT kAnalysisFinished = WM_APP + 1U;
 constexpr UINT kMasterFinished = WM_APP + 2U;
 constexpr UINT kExportFinished = WM_APP + 3U;
 constexpr UINT kJobProgress = WM_APP + 4U;
+constexpr UINT kRevisionFinished = WM_APP + 5U;
+constexpr UINT kBatchFinished = WM_APP + 6U;
 
 constexpr int kOpenId = 1001;
 constexpr int kRecentId = 1002;
@@ -58,6 +75,11 @@ constexpr int kMasterAId = 1013;
 constexpr int kMasterBId = 1014;
 constexpr int kRecipeId = 1020;
 constexpr int kSeekId = 1101;
+constexpr int kRevisionEditId = 1201;
+constexpr int kRevisionButtonId = 1202;
+constexpr int kTranslationComboId = 1210;
+constexpr int kBatchButtonId = 1230;
+constexpr int kSettingsButtonId = 1240;
 constexpr UINT kRecentMenuBase = 40000U;
 
 HMENU control_menu(const int id) noexcept {
@@ -72,6 +94,17 @@ std::wstring widen_utf8(const std::string& text) {
   std::wstring output(static_cast<std::size_t>(count), L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
                       output.data(), count);
+  return output;
+}
+
+std::string narrow_utf8(const std::wstring& text) {
+  if (text.empty()) return {};
+  const int count = WideCharToMultiByte(CP_UTF8, 0, text.c_str(),
+                                        static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+  if (count <= 0) return {};
+  std::string output(static_cast<std::size_t>(count), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+                      output.data(), count, nullptr, nullptr);
   return output;
 }
 
@@ -93,11 +126,16 @@ struct AppState {
   HWND master_button{nullptr};
   HWND export_button{nullptr};
   HWND cancel_button{nullptr};
+  HWND settings_button{nullptr};
+  HWND batch_button{nullptr};
   HWND play_button{nullptr};
   HWND stop_button{nullptr};
   HWND original_button{nullptr};
   HWND master_a_button{nullptr};
   HWND master_b_button{nullptr};
+  HWND translation_combo{nullptr};
+  HWND revision_edit{nullptr};
+  HWND revision_button{nullptr};
   HWND recipe_combo{nullptr};
   HWND seek{nullptr};
   HWND progress{nullptr};
@@ -110,6 +148,9 @@ struct AppState {
   std::optional<amt::mastering::MasteringPlan> plan;
   std::optional<amt::mastering::MasteringRenderPair> rendered;
   std::optional<amt::project::ProjectRecord> project;
+
+  std::string last_revision_explanation;
+  amt::translation::PlaybackClassId active_translation{amt::translation::PlaybackClassId::studio_monitors};
 
   std::mutex data_mutex;
   std::thread worker;
@@ -203,12 +244,17 @@ void update_controls(AppState& state) {
   EnableWindow(state.export_button, has_source && !busy);
   EnableWindow(state.cancel_button, busy);
   EnableWindow(state.recipe_combo, !busy);
+  EnableWindow(state.settings_button, !busy);
+  EnableWindow(state.batch_button, !busy);
   EnableWindow(state.play_button, has_source && state.playable);
   EnableWindow(state.stop_button, has_source && state.playable);
   EnableWindow(state.seek, has_source && state.playable);
   EnableWindow(state.original_button, has_masters && state.comparison_ready && state.playable);
   EnableWindow(state.master_a_button, has_masters && state.comparison_ready && state.playable);
   EnableWindow(state.master_b_button, has_masters && state.comparison_ready && state.playable);
+  EnableWindow(state.translation_combo, has_masters && !busy);
+  EnableWindow(state.revision_edit, has_masters && !busy);
+  EnableWindow(state.revision_button, has_masters && !busy);
 }
 
 void update_details(AppState& state) {
@@ -217,7 +263,7 @@ void update_details(AppState& state) {
   text << std::fixed << std::setprecision(2);
   if (!state.project) {
     text << L"Drop a WAV, AIFF, or FLAC file here, or choose Open.\r\n"
-         << L"The normal workflow is Analyze → Master → loudness-matched Original/A/B → Export.";
+         << L"The normal workflow is Analyze → Master → loudness-matched Original/A/B → Natural Revision → Export.";
     SetWindowTextW(state.details, text.str().c_str());
     return;
   }
@@ -278,6 +324,20 @@ void update_details(AppState& state) {
          << L" LUFS\r\n";
   }
 
+  if (!state.last_revision_explanation.empty()) {
+    text << L"\r\nLAST NATURAL-LANGUAGE REVISION\r\n"
+         << widen_utf8(state.last_revision_explanation) << L"\r\n";
+  }
+
+  const auto* current_class = amt::translation::find_playback_class(state.active_translation);
+  if (current_class) {
+    text << L"\r\nPLAYBACK TRANSLATION SIMULATION (" << widen_utf8(current_class->name) << L")\r\n"
+         << L"Low Cutoff: " << current_class->low_cutoff_hz << L" Hz — High Cutoff: "
+         << current_class->high_cutoff_hz << L" Hz\r\n"
+         << L"Mono Fold: " << (current_class->fold_to_mono ? L"Yes (Mono Summed)" : L"No (Stereo Kept)")
+         << L" — Max Linear Peak: " << current_class->max_linear_peak_db << L" dBTP\r\n";
+  }
+
   if (project.source_diagnostics) {
     const auto& diagnostics = *project.source_diagnostics;
     text << L"\r\nSOURCE DIAGNOSTICS (restored)\r\n"
@@ -302,9 +362,9 @@ RECT waveform_rect(HWND window) {
   RECT client{};
   GetClientRect(window, &client);
   const int height = static_cast<int>(client.bottom - client.top);
-  const int waveform_height = std::max(120, std::min(230, height / 3));
-  return RECT{12, 122, std::max<LONG>(13, client.right - 12),
-              static_cast<LONG>(122 + waveform_height)};
+  const int waveform_height = std::max(100, std::min(200, height / 3));
+  return RECT{12, 154, std::max<LONG>(13, client.right - 12),
+              static_cast<LONG>(154 + waveform_height)};
 }
 
 void draw_waveform(AppState& state, HDC dc) {
@@ -389,30 +449,45 @@ void layout(AppState& state) {
   const int width = static_cast<int>(client.right - client.left);
   const int height = static_cast<int>(client.bottom - client.top);
   constexpr int margin = 12;
-  constexpr int gap = 7;
-  constexpr int button_height = 30;
-  constexpr int button_width = 86;
+  constexpr int gap = 6;
+  constexpr int button_height = 28;
+  constexpr int button_width = 80;
+
+  // Row 1: Action bar
   int x = margin;
   for (HWND button : {state.open_button, state.recent_button, state.analyze_button,
-                      state.master_button, state.export_button, state.cancel_button}) {
-    MoveWindow(button, x, margin, button_width, button_height, TRUE);
-    x += button_width + gap;
+                      state.master_button, state.export_button, state.cancel_button,
+                      state.batch_button, state.settings_button}) {
+    const int w = (button == state.batch_button) ? 92 : button_width;
+    MoveWindow(button, x, margin, w, button_height, TRUE);
+    x += w + gap;
   }
-  MoveWindow(state.recipe_combo, x, margin, std::max(170, width - x - margin), 300, TRUE);
+  MoveWindow(state.recipe_combo, x, margin, std::max(160, width - x - margin), 300, TRUE);
 
+  // Row 2: Transport and Auditioning
   x = margin;
   for (HWND button : {state.play_button, state.stop_button, state.original_button,
                       state.master_a_button, state.master_b_button}) {
-    const int current_width = button == state.master_a_button ? 150 : 96;
-    MoveWindow(button, x, 49, current_width, button_height, TRUE);
+    const int current_width = button == state.master_a_button ? 140 : 88;
+    MoveWindow(button, x, 46, current_width, button_height, TRUE);
     x += current_width + gap;
   }
-  MoveWindow(state.status, margin, 88, std::max(10, width - 2 * margin), 25, TRUE);
+  MoveWindow(state.translation_combo, x, 46, std::max(180, width - x - margin), 300, TRUE);
 
+  // Row 3: Natural Language Revision Bar
+  const int rev_button_width = 88;
+  const int rev_edit_width = std::max(100, width - margin * 2 - rev_button_width - gap);
+  MoveWindow(state.revision_edit, margin, 80, rev_edit_width, button_height, TRUE);
+  MoveWindow(state.revision_button, margin + rev_edit_width + gap, 80, rev_button_width, button_height, TRUE);
+
+  // Status message
+  MoveWindow(state.status, margin, 114, std::max(10, width - 2 * margin), 22, TRUE);
+
+  // Waveform, Seek, Progress, Details
   const RECT wave = waveform_rect(state.window);
-  MoveWindow(state.seek, margin, wave.bottom + 5, std::max(10, width - 2 * margin), 30, TRUE);
-  MoveWindow(state.progress, margin, wave.bottom + 38, std::max(10, width - 2 * margin), 14, TRUE);
-  const int details_top = static_cast<int>(wave.bottom) + 60;
+  MoveWindow(state.seek, margin, wave.bottom + 4, std::max(10, width - 2 * margin), 28, TRUE);
+  MoveWindow(state.progress, margin, wave.bottom + 34, std::max(10, width - 2 * margin), 12, TRUE);
+  const int details_top = static_cast<int>(wave.bottom) + 52;
   MoveWindow(state.details, margin, details_top, std::max(10, width - 2 * margin),
              std::max(60, height - details_top - margin), TRUE);
 }
@@ -426,6 +501,15 @@ void populate_recipes(AppState& state) {
     SendMessageW(state.recipe_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
   }
   SendMessageW(state.recipe_combo, CB_SETCURSEL, 0, 0);
+}
+
+void populate_translations(AppState& state) {
+  SendMessageW(state.translation_combo, CB_RESETCONTENT, 0, 0);
+  for (const auto& item : amt::translation::builtin_playback_classes()) {
+    std::wstring label = L"Preview: " + widen_utf8(item.name);
+    SendMessageW(state.translation_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+  }
+  SendMessageW(state.translation_combo, CB_SETCURSEL, 0, 0);
 }
 
 const amt::project::ExportRecipe* selected_recipe(AppState& state) {
@@ -824,6 +908,221 @@ void begin_export(AppState& state) {
   });
 }
 
+void begin_revision(AppState& state) {
+  if (state.busy.load(std::memory_order_acquire)) return;
+  wchar_t buffer[1024]{};
+  GetWindowTextW(state.revision_edit, buffer, static_cast<int>(std::size(buffer)));
+  std::string prompt = narrow_utf8(buffer);
+  if (prompt.empty()) {
+    show_error(state.window, L"Revision Prompt", "Please enter a revision instruction (e.g. 'punchier drums', 'tame high end').");
+    return;
+  }
+
+  amt::mastering::MasteringPlan current_plan;
+  amt::project::ProjectRecord project_snapshot;
+  amt::project::CandidateSelection target_selection = amt::project::CandidateSelection::master_a;
+  {
+    std::scoped_lock lock(state.data_mutex);
+    if (!state.plan || !state.project || !state.rendered) {
+      show_error(state.window, L"Revision Error", "Mastering must be completed before applying revisions.");
+      return;
+    }
+    current_plan = *state.plan;
+    project_snapshot = *state.project;
+    target_selection = state.project->selected;
+  }
+
+  amt::revision::RevisionParser parser;
+  auto intent = parser.parse(prompt);
+  if (!intent.parsed_successfully) {
+    show_error(state.window, L"Revision Parse Error", intent.parse_error);
+    return;
+  }
+
+  auto val = amt::revision::ConstraintResolver::validate_constraints(intent);
+  if (!val.is_valid && !val.violated_constraints.empty()) {
+    show_error(state.window, L"Constraint Violation", val.violated_constraints.front());
+    return;
+  }
+
+  auto& candidate_plan = (target_selection == amt::project::CandidateSelection::master_b)
+                             ? current_plan.master_b
+                             : current_plan.master_a;
+
+  auto edit_res = amt::revision::PlanEditor::apply_revision(candidate_plan, intent);
+  if (!edit_res.success) {
+    show_error(state.window, L"Revision Error", edit_res.error);
+    return;
+  }
+
+  std::string explanation = amt::revision::RevisionExplanation::generate_explanation(intent, edit_res);
+  candidate_plan = edit_res.revised_plan;
+
+  stop_playback(state);
+  state.comparison_ready = false;
+  start_job(state, L"Applying natural-language revision…");
+
+  const auto source = state.source_path;
+  const auto output_dir = state.projects.root() / project_snapshot.project_id / "renders";
+  const auto cancellation = state.cancellation;
+  HWND window = state.window;
+  AppState* state_pointer = &state;
+
+  state.worker = std::thread([source, output_dir, current_plan, explanation,
+                              project_snapshot = std::move(project_snapshot),
+                              target_selection, cancellation, window, state_pointer]() mutable {
+    amt::codec::SndFileCodecService codecs;
+    std::string error;
+    const auto out_path = output_dir / ((target_selection == amt::project::CandidateSelection::master_b)
+                                            ? "master_b_revised.wav"
+                                            : "master_a_revised.wav");
+    const auto& cand = (target_selection == amt::project::CandidateSelection::master_b)
+                           ? current_plan.master_b
+                           : current_plan.master_a;
+
+    auto rendered_candidate = amt::mastering::render_candidate(
+        codecs, source, out_path, cand, error, {}, cancellation.get(),
+        [window](const double value) {
+          PostMessageW(window, kJobProgress,
+                       static_cast<WPARAM>(std::clamp(
+                           static_cast<int>(std::lround(value * 1000.0)), 0, 1000)), 0);
+        });
+
+    if (rendered_candidate) {
+      if (target_selection == amt::project::CandidateSelection::master_b) {
+        project_snapshot.master_b = {
+            .available = true,
+            .path = rendered_candidate->output_path,
+            .integrated_lufs = rendered_candidate->analysis.loudness.integrated_lufs,
+            .true_peak_dbtp = rendered_candidate->analysis.loudness.true_peak_dbtp,
+            .recommended = false};
+      } else {
+        project_snapshot.master_a = {
+            .available = true,
+            .path = rendered_candidate->output_path,
+            .integrated_lufs = rendered_candidate->analysis.loudness.integrated_lufs,
+            .true_peak_dbtp = rendered_candidate->analysis.loudness.true_peak_dbtp,
+            .recommended = true};
+      }
+      std::string store_err;
+      state_pointer->projects.append_revision(
+          project_snapshot, "revision", explanation, rendered_candidate->output_path, store_err);
+    }
+
+    {
+      std::scoped_lock lock(state_pointer->data_mutex);
+      if (rendered_candidate) {
+        state_pointer->project = std::move(project_snapshot);
+        state_pointer->plan = current_plan;
+        state_pointer->last_revision_explanation = explanation;
+        if (state_pointer->rendered) {
+          if (target_selection == amt::project::CandidateSelection::master_b) {
+            state_pointer->rendered->master_b = *rendered_candidate;
+          } else {
+            state_pointer->rendered->master_a = *rendered_candidate;
+          }
+        }
+      }
+      state_pointer->worker_error = std::move(error);
+    }
+    state_pointer->busy.store(false, std::memory_order_release);
+    PostMessageW(window, kRevisionFinished, rendered_candidate.has_value() ? 1U : 0U, 0);
+  });
+}
+
+void show_settings_dialog(AppState& state) {
+  amt::settings::SettingsManager settings_mgr;
+  std::string err;
+  settings_mgr.load(err);
+  amt::settings::CacheManager cache_mgr(settings_mgr.settings().cache_directory);
+  auto inv = cache_mgr.inspect_cache();
+
+  amt::settings::ModelManager model_mgr(settings_mgr.settings().models_directory);
+  auto models = model_mgr.list_installed_models();
+
+  std::wostringstream text;
+  text << L"=== SETTINGS & CACHE STATUS ===\r\n\r\n"
+       << L"Audio Output: " << widen_utf8(settings_mgr.settings().audio_output_device.empty() ? "Default WASAPI Device" : settings_mgr.settings().audio_output_device) << L"\r\n"
+       << L"Buffer Size: " << settings_mgr.settings().buffer_size_frames << L" frames\r\n"
+       << L"Cache Directory: " << widen_utf8(settings_mgr.settings().cache_directory.string()) << L"\r\n"
+       << L"Cache Items: " << inv.total_items << L" (" << std::fixed << std::setprecision(1) << inv.total_mb << L" MB used of " << settings_mgr.settings().max_cache_size_mb << L" MB budget)\r\n\r\n"
+       << L"=== INSTALLED AI MODELS ===\r\n";
+  for (const auto& m : models) {
+    text << L"• " << widen_utf8(m.name) << L": " << widen_utf8(m.status_description) << L"\r\n";
+  }
+  text << L"\r\nWould you like to clear temporary disposable cache files now?";
+
+  int res = MessageBoxW(state.window, text.str().c_str(), L"Settings & Cache Management", MB_YESNO | MB_ICONINFORMATION);
+  if (res == IDYES) {
+    std::string clear_err;
+    cache_mgr.clear_all_disposable(clear_err);
+    MessageBoxW(state.window, L"Temporary cache files cleared successfully.", L"Cache Cleared", MB_OK | MB_ICONINFORMATION);
+  }
+}
+
+void begin_batch_dialog(AppState& state) {
+  wchar_t buffer[65536]{};
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof(dialog);
+  dialog.hwndOwner = state.window;
+  dialog.lpstrFilter = L"Supported audio (*.wav;*.wave;*.aif;*.aiff;*.flac)\0*.wav;*.wave;*.aif;*.aiff;*.flac\0All files (*.*)\0*.*\0\0";
+  dialog.lpstrFile = buffer;
+  dialog.nMaxFile = static_cast<DWORD>(std::size(buffer));
+  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_ALLOWMULTISELECT;
+
+  if (GetOpenFileNameW(&dialog) == FALSE) return;
+
+  std::vector<std::filesystem::path> files;
+  const wchar_t* p = buffer;
+  std::filesystem::path dir = p;
+  p += wcslen(p) + 1;
+  if (*p == L'\0') {
+    files.push_back(dir);
+  } else {
+    while (*p != L'\0') {
+      files.push_back(dir / p);
+      p += wcslen(p) + 1;
+    }
+  }
+
+  if (files.empty()) return;
+
+  std::wostringstream text;
+  text << L"Selected " << files.size() << L" track(s) for Album Batch Mastering:\r\n\r\n";
+  for (std::size_t i = 0; i < std::min<std::size_t>(files.size(), 8U); ++i) {
+    text << L"• " << widen_utf8(files[i].filename().string()) << L"\r\n";
+  }
+  if (files.size() > 8U) text << L"• ... and " << (files.size() - 8U) << L" more.\r\n";
+  text << L"\r\nMaster collection and compute dynamic cohesion?";
+
+  int res = MessageBoxW(state.window, text.str().c_str(), L"Album Batch Mastering", MB_YESNO | MB_ICONQUESTION);
+  if (res != IDYES) return;
+
+  amt::batch::BatchAlbumProject album;
+  album.album_name = "Album Master";
+  for (std::size_t i = 0; i < files.size(); ++i) {
+    amt::batch::BatchTrackItem track;
+    track.track_index = static_cast<int>(i + 1);
+    track.title = files[i].stem().string();
+    track.source_path = files[i];
+    track.target_lufs = -14.0;
+    album.tracks.push_back(track);
+  }
+
+  std::string batch_err;
+  auto codecs = std::make_shared<amt::codec::SndFileCodecService>();
+  amt::batch::BatchQueue queue(codecs);
+  const auto album_out = state.projects.root() / "AlbumRenders";
+  std::filesystem::create_directories(album_out);
+
+  bool ok = queue.process_album(album, album_out, batch_err);
+  if (ok) {
+    MessageBoxW(state.window, L"Album batch mastering completed successfully! Manifest and reports exported to project folder.", L"Batch Complete", MB_OK | MB_ICONINFORMATION);
+  } else {
+    show_error(state.window, L"Batch Mastering Failed", batch_err);
+  }
+}
+
 void set_selection(AppState& state, const amt::project::CandidateSelection selection) {
   if (!state.comparison_ready) return;
   state.comparison.select(comparison_source(selection));
@@ -956,6 +1255,10 @@ void create_controls(AppState& state) {
                                         state.window, control_menu(kExportId), nullptr, nullptr);
   state.cancel_button = CreateWindowExW(0, L"BUTTON", L"Cancel", button, 0, 0, 0, 0,
                                         state.window, control_menu(kCancelId), nullptr, nullptr);
+  state.batch_button = CreateWindowExW(0, L"BUTTON", L"Album Batch", button, 0, 0, 0, 0,
+                                       state.window, control_menu(kBatchButtonId), nullptr, nullptr);
+  state.settings_button = CreateWindowExW(0, L"BUTTON", L"Settings", button, 0, 0, 0, 0,
+                                          state.window, control_menu(kSettingsButtonId), nullptr, nullptr);
   state.recipe_combo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", L"",
       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 0, 0, 0, 0,
       state.window, control_menu(kRecipeId), nullptr, nullptr);
@@ -970,6 +1273,18 @@ void create_controls(AppState& state) {
                                           state.window, control_menu(kMasterAId), nullptr, nullptr);
   state.master_b_button = CreateWindowExW(0, L"BUTTON", L"Master B", button, 0, 0, 0, 0,
                                           state.window, control_menu(kMasterBId), nullptr, nullptr);
+  state.translation_combo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", L"",
+      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 0, 0, 0, 0,
+      state.window, control_menu(kTranslationComboId), nullptr, nullptr);
+
+  state.revision_edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0,
+      state.window, control_menu(kRevisionEditId), nullptr, nullptr);
+  SendMessageW(state.revision_edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Natural language revision: e.g. 'punchier kick', 'tame harsh highs', 'preserve sub-bass'"));
+
+  state.revision_button = CreateWindowExW(0, L"BUTTON", L"Revise", button, 0, 0, 0, 0,
+                                          state.window, control_menu(kRevisionButtonId), nullptr, nullptr);
+
   state.status = CreateWindowExW(0, L"STATIC",
       L"Drop audio here or choose Open. Projects are saved locally automatically.",
       WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
@@ -985,6 +1300,7 @@ void create_controls(AppState& state) {
       ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 0, 0,
       state.window, nullptr, nullptr, nullptr);
   populate_recipes(state);
+  populate_translations(state);
   update_controls(state);
   layout(state);
 }
@@ -1022,20 +1338,34 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
       if (state) layout(*state);
       return 0;
     case WM_COMMAND:
-      if (!state || HIWORD(wparam) != BN_CLICKED) break;
-      switch (LOWORD(wparam)) {
-        case kOpenId: choose_source(*state); return 0;
-        case kRecentId: choose_recent(*state); return 0;
-        case kAnalyzeId: begin_analysis(*state); return 0;
-        case kMasterId: begin_mastering(*state); return 0;
-        case kExportId: begin_export(*state); return 0;
-        case kCancelId: cancel_job(*state); return 0;
-        case kPlayId: toggle_playback(*state); return 0;
-        case kStopId: stop_playback(*state); update_play_button(*state); return 0;
-        case kOriginalId: set_selection(*state, amt::project::CandidateSelection::original); return 0;
-        case kMasterAId: set_selection(*state, amt::project::CandidateSelection::master_a); return 0;
-        case kMasterBId: set_selection(*state, amt::project::CandidateSelection::master_b); return 0;
-        default: break;
+      if (!state) break;
+      if (HIWORD(wparam) == CBN_SELCHANGE && LOWORD(wparam) == kTranslationComboId) {
+        int sel = static_cast<int>(SendMessageW(state->translation_combo, CB_GETCURSEL, 0, 0));
+        const auto& classes = amt::translation::builtin_playback_classes();
+        if (sel >= 0 && static_cast<std::size_t>(sel) < classes.size()) {
+          state->active_translation = classes[static_cast<std::size_t>(sel)].id;
+          update_details(*state);
+        }
+        return 0;
+      }
+      if (HIWORD(wparam) == BN_CLICKED) {
+        switch (LOWORD(wparam)) {
+          case kOpenId: choose_source(*state); return 0;
+          case kRecentId: choose_recent(*state); return 0;
+          case kAnalyzeId: begin_analysis(*state); return 0;
+          case kMasterId: begin_mastering(*state); return 0;
+          case kExportId: begin_export(*state); return 0;
+          case kCancelId: cancel_job(*state); return 0;
+          case kPlayId: toggle_playback(*state); return 0;
+          case kStopId: stop_playback(*state); update_play_button(*state); return 0;
+          case kOriginalId: set_selection(*state, amt::project::CandidateSelection::original); return 0;
+          case kMasterAId: set_selection(*state, amt::project::CandidateSelection::master_a); return 0;
+          case kMasterBId: set_selection(*state, amt::project::CandidateSelection::master_b); return 0;
+          case kRevisionButtonId: begin_revision(*state); return 0;
+          case kSettingsButtonId: show_settings_dialog(*state); return 0;
+          case kBatchButtonId: begin_batch_dialog(*state); return 0;
+          default: break;
+        }
       }
       break;
     case WM_HSCROLL:
@@ -1055,6 +1385,9 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
           L"Analysis complete — findings stored in project history.");
       return 0;
     case kMasterFinished:
+      if (state) finish_mastering(*state, wparam != 0U);
+      return 0;
+    case kRevisionFinished:
       if (state) finish_mastering(*state, wparam != 0U);
       return 0;
     case kExportFinished:

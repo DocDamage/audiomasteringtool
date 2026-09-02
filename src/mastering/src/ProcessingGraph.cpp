@@ -92,6 +92,17 @@ void write_params(std::ostringstream& stream, const amt::dsp::ProcessorParams& p
 
 void ProcessingGraph::add(amt::dsp::ProcessorSpec spec) { nodes_.push_back(std::move(spec)); }
 
+bool ProcessingGraph::insert_before(const std::string& before_id,
+                                    amt::dsp::ProcessorSpec spec) {
+  const auto iterator = std::find_if(nodes_.begin(), nodes_.end(),
+                                     [&](const auto& node) {
+                                       return node.id == before_id;
+                                     });
+  if (iterator == nodes_.end()) return false;
+  nodes_.insert(iterator, std::move(spec));
+  return true;
+}
+
 bool ProcessingGraph::contains(const std::string& id) const noexcept {
   return std::any_of(nodes_.begin(), nodes_.end(), [&](const auto& node) { return node.id == id; });
 }

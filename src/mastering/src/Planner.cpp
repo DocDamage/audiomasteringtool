@@ -35,6 +35,11 @@ double reliable_lufs(const double value) {
   return std::isfinite(value) && value > -80.0 && value < 6.0 ? value : -14.0;
 }
 
+void insert_or_add(ProcessingGraph& graph, const std::string& before_id,
+                   ProcessorSpec spec) {
+  if (!graph.insert_before(before_id, spec)) graph.add(std::move(spec));
+}
+
 }  // namespace
 
 MasteringPlan plan_mastering(const amt::analysis::Phase1AnalysisReport& report) {
@@ -189,7 +194,7 @@ MasteringPlan plan_mastering(const amt::analysis::Phase1AnalysisReport& report) 
   b.rationale.push_back("Keeps tonal and dynamic intervention deliberately lighter than Master A.");
   b.rationale.push_back("Uses gentle glue plus peak control instead of clipper-led loudness shaping.");
 
-  return {.master_a = std::move(a), .master_b = std::move(b)};
+  return {.master_a = std::move(a), .master_b = std::move(b), .stem_mix = {}};
 }
 
 MasteringPlan plan_mastering(const amt::analysis::AnalysisReport& report) {
@@ -281,6 +286,125 @@ MasteringPlan plan_mastering(const amt::analysis::AnalysisReport& report) {
   a.target_lufs = std::clamp(a.target_lufs, -12.0, -8.5);
   b.target_lufs = std::clamp(b.target_lufs, -13.0, -9.5);
   return plan;
+}
+
+MasteringControls mastering_style_preset(const MasteringStyle style) {
+  MasteringControls controls;
+  controls.style = style;
+  switch (style) {
+    case MasteringStyle::balanced:
+      return controls;
+    case MasteringStyle::transparent:
+      controls.target_lufs = -13.0;
+      controls.punch = 0.35;
+      controls.warmth = 0.0;
+      return controls;
+    case MasteringStyle::punchy:
+      controls.target_lufs = -10.5;
+      controls.bass_db = 0.3;
+      controls.presence_db = 0.2;
+      controls.width = 1.04;
+      controls.punch = 0.85;
+      controls.warmth = 0.15;
+      return controls;
+    case MasteringStyle::warm:
+      controls.target_lufs = -11.5;
+      controls.bass_db = 0.8;
+      controls.presence_db = -0.5;
+      controls.punch = 0.45;
+      controls.warmth = 0.65;
+      return controls;
+    case MasteringStyle::wide:
+      controls.target_lufs = -11.5;
+      controls.bass_db = -0.2;
+      controls.presence_db = 0.3;
+      controls.width = 1.14;
+      controls.punch = 0.5;
+      return controls;
+    case MasteringStyle::loud:
+      controls.target_lufs = -9.0;
+      controls.presence_db = 0.3;
+      controls.width = 1.03;
+      controls.punch = 0.7;
+      controls.warmth = 0.3;
+      return controls;
+  }
+  return controls;
+}
+
+void apply_mastering_controls(MasteringPlan& plan,
+                              const MasteringControls& requested) {
+  const double target = std::clamp(requested.target_lufs, -14.0, -8.0);
+  const double bass = std::clamp(requested.bass_db, -3.0, 3.0);
+  const double presence = std::clamp(requested.presence_db, -3.0, 3.0);
+  const double width = std::clamp(requested.width, 0.80, 1.20);
+  const double punch = std::clamp(requested.punch, 0.0, 1.0);
+  const double warmth = std::clamp(requested.warmth, 0.0, 1.0);
+
+  plan.master_a.target_lufs = target;
+  plan.master_b.target_lufs = std::clamp(target - 1.5, -14.0, -9.5);
+  plan.stem_mix = {
+      .drums_db = std::clamp(requested.stem_mix.drums_db, -12.0, 6.0),
+      .bass_db = std::clamp(requested.stem_mix.bass_db, -12.0, 6.0),
+      .vocals_db = std::clamp(requested.stem_mix.vocals_db, -12.0, 6.0),
+      .other_db = std::clamp(requested.stem_mix.other_db, -12.0, 6.0)};
+
+  auto apply = [&](MasteringCandidatePlan& candidate, const std::string& prefix,
+                   const std::string& dynamics_anchor,
+                   const std::string& peak_anchor, const double scale) {
+    std::vector<EqBand> tone;
+    if (std::abs(bass) >= 0.05) {
+      tone.push_back({.shape = EqShape::low_shelf, .frequency_hz = 105.0,
+                      .gain_db = bass * scale, .q = 0.707});
+    }
+    if (std::abs(presence) >= 0.05) {
+      tone.push_back({.shape = EqShape::peak, .frequency_hz = 4200.0,
+                      .gain_db = presence * scale, .q = 0.85});
+    }
+    if (!tone.empty()) {
+      insert_or_add(candidate.graph, dynamics_anchor,
+                    ProcessorSpec{.id = prefix + "user_tone",
+                                  .bypass = false,
+                                  .params = EqParams{.bands = std::move(tone)}});
+    }
+
+    const double attack_db = (punch - 0.5) * 3.0 * scale;
+    if (std::abs(attack_db) >= 0.08) {
+      insert_or_add(candidate.graph, peak_anchor,
+                    ProcessorSpec{.id = prefix + "user_punch",
+                                  .bypass = false,
+                                  .params = TransientParams{
+                                      .attack_db = attack_db,
+                                      .sustain_db = -attack_db * 0.12,
+                                      .fast_ms = 3.0,
+                                      .slow_ms = 34.0,
+                                      .mix = 0.72}});
+    }
+
+    if (std::abs(width - 1.0) >= 0.005) {
+      insert_or_add(candidate.graph, peak_anchor,
+                    ProcessorSpec{.id = prefix + "user_width",
+                                  .bypass = false,
+                                  .params = StereoParams{
+                                      .width = 1.0 + (width - 1.0) * scale,
+                                      .bass_mono_hz = 105.0}});
+    }
+
+    if (warmth >= 0.01) {
+      insert_or_add(candidate.graph, peak_anchor,
+                    ProcessorSpec{.id = prefix + "user_warmth",
+                                  .bypass = false,
+                                  .params = SaturationParams{
+                                      .drive_db = 0.8 + warmth * 2.8,
+                                      .mix = warmth * 0.12 * scale}});
+    }
+
+    candidate.rationale.push_back(
+        "Applied user mastering controls for loudness, tone, dynamics, width, and warmth before final peak protection.");
+  };
+
+  apply(plan.master_a, "a_", "a_glue", "a_clipper", 1.0);
+  apply(plan.master_b, "b_", "b_glue", "b_limiter", 0.65);
 }
 
 }  // namespace amt::mastering

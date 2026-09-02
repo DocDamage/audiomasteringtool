@@ -13,6 +13,8 @@ namespace amt::mastering {
 class ProcessingGraph {
  public:
   void add(amt::dsp::ProcessorSpec spec);
+  bool insert_before(const std::string& before_id,
+                     amt::dsp::ProcessorSpec spec);
   [[nodiscard]] const std::vector<amt::dsp::ProcessorSpec>& nodes() const noexcept { return nodes_; }
   [[nodiscard]] bool empty() const noexcept { return nodes_.empty(); }
   [[nodiscard]] bool contains(const std::string& id) const noexcept;

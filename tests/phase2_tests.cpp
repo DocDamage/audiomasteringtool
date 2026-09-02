@@ -195,6 +195,34 @@ void test_planner_and_loudness_match() {
   assert(plan.master_b.preservation_bias > plan.master_a.preservation_bias);
   assert(plan.master_b.target_lufs <= plan.master_a.target_lufs);
 
+  auto controlled = plan;
+  auto controls = amt::mastering::mastering_style_preset(
+      amt::mastering::MasteringStyle::warm);
+  controls.width = 1.12;
+  controls.punch = 0.8;
+  controls.stem_mix.drums_db = 2.5;
+  controls.stem_mix.vocals_db = -3.0;
+  amt::mastering::apply_mastering_controls(controlled, controls);
+  assert(std::abs(controlled.master_a.target_lufs - controls.target_lufs) < 1.0e-9);
+  assert(controlled.master_b.target_lufs < controlled.master_a.target_lufs);
+  assert(controlled.master_a.graph.contains("a_user_tone"));
+  assert(controlled.master_a.graph.contains("a_user_punch"));
+  assert(controlled.master_a.graph.contains("a_user_width"));
+  assert(controlled.master_a.graph.contains("a_user_warmth"));
+  assert(std::abs(controlled.stem_mix.drums_db - 2.5) < 1.0e-9);
+  assert(std::abs(controlled.stem_mix.vocals_db + 3.0) < 1.0e-9);
+  assert(controlled.master_a.graph.validate(error));
+  const auto& controlled_nodes = controlled.master_a.graph.nodes();
+  const auto user_width = std::find_if(
+      controlled_nodes.begin(), controlled_nodes.end(),
+      [](const auto& node) { return node.id == "a_user_width"; });
+  const auto limiter = std::find_if(
+      controlled_nodes.begin(), controlled_nodes.end(),
+      [](const auto& node) { return node.id == "a_limiter"; });
+  assert(user_width != controlled_nodes.end());
+  assert(limiter != controlled_nodes.end());
+  assert(user_width < limiter);
+
   amt::analysis::LoudnessMetrics original;
   amt::analysis::LoudnessMetrics a;
   amt::analysis::LoudnessMetrics b;

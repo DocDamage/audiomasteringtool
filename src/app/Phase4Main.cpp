@@ -7,6 +7,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -81,6 +82,17 @@ constexpr int kRevisionButtonId = 1202;
 constexpr int kTranslationComboId = 1210;
 constexpr int kBatchButtonId = 1230;
 constexpr int kSettingsButtonId = 1240;
+constexpr int kStyleComboId = 1250;
+constexpr int kTargetSliderId = 1251;
+constexpr int kBassSliderId = 1252;
+constexpr int kPresenceSliderId = 1253;
+constexpr int kWidthSliderId = 1254;
+constexpr int kPunchSliderId = 1255;
+constexpr int kWarmthSliderId = 1256;
+constexpr int kDrumsSliderId = 1260;
+constexpr int kStemBassSliderId = 1261;
+constexpr int kVocalsSliderId = 1262;
+constexpr int kOtherSliderId = 1263;
 constexpr UINT kRecentMenuBase = 40000U;
 
 LONG WINAPI record_unhandled_exception(EXCEPTION_POINTERS* exception) {
@@ -164,6 +176,12 @@ struct AppState {
   HWND progress{nullptr};
   HWND status{nullptr};
   HWND details{nullptr};
+  HWND style_label{nullptr};
+  HWND style_combo{nullptr};
+  std::array<HWND, 6> mastering_labels{};
+  std::array<HWND, 6> mastering_sliders{};
+  std::array<HWND, 4> stem_mix_labels{};
+  std::array<HWND, 4> stem_mix_sliders{};
 
   std::filesystem::path source_path;
   std::optional<amt::codec::AudioMetadata> metadata;
@@ -182,6 +200,10 @@ struct AppState {
   std::string worker_error;
   bool playable{false};
   bool comparison_ready{false};
+  int last_seek_position{-1};
+  amt::mastering::MasteringControls mastering_controls =
+      amt::mastering::mastering_style_preset(
+          amt::mastering::MasteringStyle::balanced);
 
   ~AppState() {
     if (cancellation) cancellation->cancel();
@@ -247,7 +269,92 @@ void update_play_button(AppState& state) {
   const wchar_t* text = L"Play";
   if (transport_state(state) == amt::playback::TransportState::playing) text = L"Pause";
   else if (transport_state(state) == amt::playback::TransportState::paused) text = L"Resume";
-  SetWindowTextW(state.play_button, text);
+  wchar_t current[16]{};
+  GetWindowTextW(state.play_button, current, static_cast<int>(std::size(current)));
+  if (std::wstring(current) != text) SetWindowTextW(state.play_button, text);
+}
+
+void update_mastering_control_labels(AppState& state) {
+  const auto& controls = state.mastering_controls;
+  const std::array<std::wstring, 6> labels = {
+      L"Loudness  " + std::to_wstring(controls.target_lufs).substr(0, 5) + L" LUFS",
+      L"Bass  " + std::to_wstring(controls.bass_db).substr(0, 4) + L" dB",
+      L"Presence  " + std::to_wstring(controls.presence_db).substr(0, 4) + L" dB",
+      L"Width  " + std::to_wstring(static_cast<int>(std::lround(controls.width * 100.0))) + L"%",
+      L"Punch  " + std::to_wstring(static_cast<int>(std::lround(controls.punch * 100.0))) + L"%",
+      L"Warmth  " + std::to_wstring(static_cast<int>(std::lround(controls.warmth * 100.0))) + L"%"};
+  for (std::size_t index = 0; index < labels.size(); ++index) {
+    SetWindowTextW(state.mastering_labels[index], labels[index].c_str());
+  }
+  const auto& stems = controls.stem_mix;
+  const std::array<std::pair<const wchar_t*, double>, 4> stem_values = {{
+      {L"Drums", stems.drums_db}, {L"Bass stem", stems.bass_db},
+      {L"Vocals", stems.vocals_db}, {L"Other", stems.other_db}}};
+  for (std::size_t index = 0; index < stem_values.size(); ++index) {
+    std::wostringstream label;
+    label << stem_values[index].first << L"  " << std::fixed
+          << std::setprecision(1) << stem_values[index].second << L" dB";
+    SetWindowTextW(state.stem_mix_labels[index], label.str().c_str());
+  }
+}
+
+void set_mastering_sliders(AppState& state) {
+  const auto& controls = state.mastering_controls;
+  SendMessageW(state.mastering_sliders[0], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(-controls.target_lufs * 10.0)));
+  SendMessageW(state.mastering_sliders[1], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(controls.bass_db * 10.0 + 30.0)));
+  SendMessageW(state.mastering_sliders[2], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(controls.presence_db * 10.0 + 30.0)));
+  SendMessageW(state.mastering_sliders[3], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(controls.width * 100.0)));
+  SendMessageW(state.mastering_sliders[4], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(controls.punch * 100.0)));
+  SendMessageW(state.mastering_sliders[5], TBM_SETPOS, TRUE,
+               static_cast<LPARAM>(std::lround(controls.warmth * 100.0)));
+  const std::array<double, 4> stem_gains = {
+      controls.stem_mix.drums_db, controls.stem_mix.bass_db,
+      controls.stem_mix.vocals_db, controls.stem_mix.other_db};
+  for (std::size_t index = 0; index < stem_gains.size(); ++index) {
+    SendMessageW(state.stem_mix_sliders[index], TBM_SETPOS, TRUE,
+                 static_cast<LPARAM>(std::lround(stem_gains[index] * 2.0 + 24.0)));
+  }
+  update_mastering_control_labels(state);
+}
+
+void read_mastering_sliders(AppState& state) {
+  state.mastering_controls.target_lufs =
+      -static_cast<double>(SendMessageW(state.mastering_sliders[0], TBM_GETPOS, 0, 0)) / 10.0;
+  state.mastering_controls.bass_db =
+      (static_cast<double>(SendMessageW(state.mastering_sliders[1], TBM_GETPOS, 0, 0)) - 30.0) / 10.0;
+  state.mastering_controls.presence_db =
+      (static_cast<double>(SendMessageW(state.mastering_sliders[2], TBM_GETPOS, 0, 0)) - 30.0) / 10.0;
+  state.mastering_controls.width =
+      static_cast<double>(SendMessageW(state.mastering_sliders[3], TBM_GETPOS, 0, 0)) / 100.0;
+  state.mastering_controls.punch =
+      static_cast<double>(SendMessageW(state.mastering_sliders[4], TBM_GETPOS, 0, 0)) / 100.0;
+  state.mastering_controls.warmth =
+      static_cast<double>(SendMessageW(state.mastering_sliders[5], TBM_GETPOS, 0, 0)) / 100.0;
+  state.mastering_controls.stem_mix.drums_db =
+      (static_cast<double>(SendMessageW(state.stem_mix_sliders[0], TBM_GETPOS, 0, 0)) - 24.0) / 2.0;
+  state.mastering_controls.stem_mix.bass_db =
+      (static_cast<double>(SendMessageW(state.stem_mix_sliders[1], TBM_GETPOS, 0, 0)) - 24.0) / 2.0;
+  state.mastering_controls.stem_mix.vocals_db =
+      (static_cast<double>(SendMessageW(state.stem_mix_sliders[2], TBM_GETPOS, 0, 0)) - 24.0) / 2.0;
+  state.mastering_controls.stem_mix.other_db =
+      (static_cast<double>(SendMessageW(state.stem_mix_sliders[3], TBM_GETPOS, 0, 0)) - 24.0) / 2.0;
+  update_mastering_control_labels(state);
+}
+
+void select_mastering_style(AppState& state) {
+  const int selected = static_cast<int>(
+      SendMessageW(state.style_combo, CB_GETCURSEL, 0, 0));
+  if (selected < 0 || selected > 5) return;
+  const auto stem_mix = state.mastering_controls.stem_mix;
+  state.mastering_controls = amt::mastering::mastering_style_preset(
+      static_cast<amt::mastering::MasteringStyle>(selected));
+  state.mastering_controls.stem_mix = stem_mix;
+  set_mastering_sliders(state);
 }
 
 void update_controls(AppState& state) {
@@ -278,6 +385,9 @@ void update_controls(AppState& state) {
   EnableWindow(state.translation_combo, has_masters && !busy);
   EnableWindow(state.revision_edit, has_masters && !busy);
   EnableWindow(state.revision_button, has_masters && !busy);
+  EnableWindow(state.style_combo, !busy);
+  for (HWND slider : state.mastering_sliders) EnableWindow(slider, !busy);
+  for (HWND slider : state.stem_mix_sliders) EnableWindow(slider, !busy);
 }
 
 void update_details(AppState& state) {
@@ -295,7 +405,17 @@ void update_details(AppState& state) {
   text << L"PROJECT\r\n"
        << widen_utf8(project.display_name) << L"\r\n"
        << L"History nodes: " << project.revisions.size() << L"\r\n"
-       << L"Selected: " << selection_label(project.selected) << L"\r\n";
+       << L"Selected: " << selection_label(project.selected) << L"\r\n"
+       << L"Master controls: " << state.mastering_controls.target_lufs
+       << L" LUFS, bass " << state.mastering_controls.bass_db
+       << L" dB, presence " << state.mastering_controls.presence_db
+       << L" dB, width " << state.mastering_controls.width * 100.0
+       << L"%, punch " << state.mastering_controls.punch * 100.0
+       << L"%, warmth " << state.mastering_controls.warmth * 100.0 << L"%\r\n"
+       << L"Stem balance: drums " << state.mastering_controls.stem_mix.drums_db
+       << L" dB, bass " << state.mastering_controls.stem_mix.bass_db
+       << L" dB, vocals " << state.mastering_controls.stem_mix.vocals_db
+       << L" dB, other " << state.mastering_controls.stem_mix.other_db << L" dB\r\n";
 
   if (!state.analysis) {
     if (project.source_integrated_lufs > -79.0) {
@@ -386,8 +506,8 @@ RECT waveform_rect(HWND window) {
   GetClientRect(window, &client);
   const int height = static_cast<int>(client.bottom - client.top);
   const int waveform_height = std::max(100, std::min(200, height / 3));
-  return RECT{12, 154, std::max<LONG>(13, client.right - 12),
-              static_cast<LONG>(154 + waveform_height)};
+  return RECT{12, 262, std::max<LONG>(13, client.right - 12),
+              static_cast<LONG>(262 + waveform_height)};
 }
 
 void draw_waveform(AppState& state, HDC dc) {
@@ -503,8 +623,46 @@ void layout(AppState& state) {
   MoveWindow(state.revision_edit, margin, 80, rev_edit_width, button_height, TRUE);
   MoveWindow(state.revision_button, margin + rev_edit_width + gap, 80, rev_button_width, button_height, TRUE);
 
+  // Row 4: hands-on mastering controls.
+  constexpr int mastering_top = 114;
+  constexpr int mastering_label_height = 18;
+  constexpr int mastering_control_height = 30;
+  constexpr int mastering_columns = 7;
+  const int mastering_width = std::max(70, (width - margin * 2 - gap * (mastering_columns - 1)) /
+                                               mastering_columns);
+  x = margin;
+  MoveWindow(state.style_label, x, mastering_top, mastering_width,
+             mastering_label_height, TRUE);
+  MoveWindow(state.style_combo, x, mastering_top + mastering_label_height,
+             mastering_width, 180, TRUE);
+  x += mastering_width + gap;
+  for (std::size_t index = 0; index < state.mastering_sliders.size(); ++index) {
+    MoveWindow(state.mastering_labels[index], x, mastering_top, mastering_width,
+               mastering_label_height, TRUE);
+    MoveWindow(state.mastering_sliders[index], x,
+               mastering_top + mastering_label_height, mastering_width,
+               mastering_control_height, TRUE);
+    x += mastering_width + gap;
+  }
+
+  // Row 5: actual separated-source balance controls. Zero is a transparent
+  // pass-through; non-zero values trigger cached HTDemucs separation.
+  constexpr int stem_top = 166;
+  constexpr int stem_columns = 4;
+  const int stem_width = std::max(
+      100, (width - margin * 2 - gap * (stem_columns - 1)) / stem_columns);
+  x = margin;
+  for (std::size_t index = 0; index < state.stem_mix_sliders.size(); ++index) {
+    MoveWindow(state.stem_mix_labels[index], x, stem_top, stem_width,
+               mastering_label_height, TRUE);
+    MoveWindow(state.stem_mix_sliders[index], x,
+               stem_top + mastering_label_height, stem_width,
+               mastering_control_height, TRUE);
+    x += stem_width + gap;
+  }
+
   // Status message
-  MoveWindow(state.status, margin, 114, std::max(10, width - 2 * margin), 22, TRUE);
+  MoveWindow(state.status, margin, 236, std::max(10, width - 2 * margin), 22, TRUE);
 
   // Waveform, Seek, Progress, Details
   const RECT wave = waveform_rect(state.window);
@@ -616,6 +774,7 @@ bool initialize_source(AppState& state, const std::filesystem::path& source,
   }
 
   prepare_comparison_from_project(state);
+  state.last_seek_position = 0;
   SendMessageW(state.seek, TBM_SETPOS, TRUE, 0);
   SendMessageW(state.progress, PBM_SETPOS, 0, 0);
   update_controls(state);
@@ -777,14 +936,17 @@ void begin_mastering(AppState& state) {
   const auto source = state.source_path;
   const auto output_directory = state.projects.root() / project_snapshot.project_id / "renders";
   const auto cancellation = state.cancellation;
+  const auto mastering_controls = state.mastering_controls;
   HWND window = state.window;
   AppState* state_pointer = &state;
   state.worker = std::thread([source, output_directory, report = std::move(report),
-                              project_snapshot = std::move(project_snapshot), cancellation,
+                              project_snapshot = std::move(project_snapshot),
+                              mastering_controls, cancellation,
                               window, state_pointer]() mutable {
     amt::codec::SndFileCodecService codecs;
     std::string error;
     auto plan = amt::mastering::plan_mastering(report);
+    amt::mastering::apply_mastering_controls(plan, mastering_controls);
     auto rendered = amt::mastering::render_mastering_plan(
         codecs, source, output_directory, report.technical, plan, error, {}, cancellation.get(),
         [window](const double value) {
@@ -1261,8 +1423,11 @@ void update_transport_ui(AppState& state) {
   const auto frame = std::clamp<std::int64_t>(playhead_frame(state), 0, state.metadata->frames);
   const int position = static_cast<int>(
       static_cast<long double>(frame) * kSeekRange / state.metadata->frames);
+  if (position == state.last_seek_position) return;
+  state.last_seek_position = position;
   SendMessageW(state.seek, TBM_SETPOS, TRUE, position);
-  InvalidateRect(state.window, nullptr, FALSE);
+  const RECT waveform = waveform_rect(state.window);
+  InvalidateRect(state.window, &waveform, FALSE);
 }
 
 void create_controls(AppState& state) {
@@ -1310,6 +1475,54 @@ void create_controls(AppState& state) {
 
   state.revision_button = CreateWindowExW(0, L"BUTTON", L"Revise", button, 0, 0, 0, 0,
                                           state.window, control_menu(kRevisionButtonId), nullptr, nullptr);
+
+  state.style_label = CreateWindowExW(0, L"STATIC", L"Mastering style",
+      WS_CHILD | WS_VISIBLE | SS_CENTER, 0, 0, 0, 0,
+      state.window, nullptr, nullptr, nullptr);
+  state.style_combo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      0, 0, 0, 0, state.window, control_menu(kStyleComboId), nullptr, nullptr);
+  for (const wchar_t* style : {L"Balanced", L"Transparent", L"Punchy",
+                               L"Warm", L"Wide", L"Loud", L"Custom"}) {
+    SendMessageW(state.style_combo, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(style));
+  }
+  SendMessageW(state.style_combo, CB_SETCURSEL, 0, 0);
+
+  const std::array<int, 6> slider_ids = {
+      kTargetSliderId, kBassSliderId, kPresenceSliderId,
+      kWidthSliderId, kPunchSliderId, kWarmthSliderId};
+  for (std::size_t index = 0; index < state.mastering_sliders.size(); ++index) {
+    state.mastering_labels[index] = CreateWindowExW(
+        0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_CENTER,
+        0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
+    state.mastering_sliders[index] = CreateWindowExW(
+        0, TRACKBAR_CLASSW, L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
+        0, 0, 0, 0, state.window, control_menu(slider_ids[index]), nullptr, nullptr);
+  }
+  SendMessageW(state.mastering_sliders[0], TBM_SETRANGE, TRUE, MAKELONG(80, 140));
+  SendMessageW(state.mastering_sliders[1], TBM_SETRANGE, TRUE, MAKELONG(0, 60));
+  SendMessageW(state.mastering_sliders[2], TBM_SETRANGE, TRUE, MAKELONG(0, 60));
+  SendMessageW(state.mastering_sliders[3], TBM_SETRANGE, TRUE, MAKELONG(80, 120));
+  SendMessageW(state.mastering_sliders[4], TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+  SendMessageW(state.mastering_sliders[5], TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+
+  const std::array<int, 4> stem_slider_ids = {
+      kDrumsSliderId, kStemBassSliderId, kVocalsSliderId, kOtherSliderId};
+  for (std::size_t index = 0; index < state.stem_mix_sliders.size(); ++index) {
+    state.stem_mix_labels[index] = CreateWindowExW(
+        0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_CENTER,
+        0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
+    state.stem_mix_sliders[index] = CreateWindowExW(
+        0, TRACKBAR_CLASSW, L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
+        0, 0, 0, 0, state.window,
+        control_menu(stem_slider_ids[index]), nullptr, nullptr);
+    SendMessageW(state.stem_mix_sliders[index], TBM_SETRANGE, TRUE,
+                 MAKELONG(0, 36));
+  }
+  set_mastering_sliders(state);
 
   state.status = CreateWindowExW(0, L"STATIC",
       L"Drop audio here or choose Open. Projects are saved locally automatically.",
@@ -1375,6 +1588,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         }
         return 0;
       }
+      if (HIWORD(wparam) == CBN_SELCHANGE && LOWORD(wparam) == kStyleComboId) {
+        select_mastering_style(*state);
+        return 0;
+      }
       if (HIWORD(wparam) == BN_CLICKED || HIWORD(wparam) == 1U) {
         switch (LOWORD(wparam)) {
           case kOpenId: choose_source(*state); return 0;
@@ -1396,9 +1613,20 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
       }
       break;
     case WM_HSCROLL:
-      if (state && reinterpret_cast<HWND>(lparam) == state->seek) {
-        const auto code = LOWORD(wparam);
-        if (code == TB_ENDTRACK || code == TB_THUMBPOSITION) seek_from_ui(*state);
+      if (state) {
+        const HWND control = reinterpret_cast<HWND>(lparam);
+        if (control == state->seek) {
+          const auto code = LOWORD(wparam);
+          if (code == TB_ENDTRACK || code == TB_THUMBPOSITION) seek_from_ui(*state);
+        } else if (std::find(state->mastering_sliders.begin(),
+                            state->mastering_sliders.end(), control) !=
+                       state->mastering_sliders.end() ||
+                   std::find(state->stem_mix_sliders.begin(),
+                             state->stem_mix_sliders.end(), control) !=
+                       state->stem_mix_sliders.end()) {
+          read_mastering_sliders(*state);
+          SendMessageW(state->style_combo, CB_SETCURSEL, 6, 0);
+        }
       }
       return 0;
     case WM_TIMER:
@@ -1424,10 +1652,27 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     case WM_PAINT: {
       PAINTSTRUCT paint{};
       HDC dc = BeginPaint(window, &paint);
-      if (state) draw_waveform(*state, dc);
+      RECT client{};
+      GetClientRect(window, &client);
+      const int width = std::max(1, static_cast<int>(client.right - client.left));
+      const int height = std::max(1, static_cast<int>(client.bottom - client.top));
+      HDC buffered = CreateCompatibleDC(dc);
+      HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+      HGDIOBJ previous_bitmap = SelectObject(buffered, bitmap);
+      FillRect(buffered, &client, GetSysColorBrush(COLOR_WINDOW));
+      if (state) draw_waveform(*state, buffered);
+      BitBlt(dc, paint.rcPaint.left, paint.rcPaint.top,
+             paint.rcPaint.right - paint.rcPaint.left,
+             paint.rcPaint.bottom - paint.rcPaint.top,
+             buffered, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+      SelectObject(buffered, previous_bitmap);
+      DeleteObject(bitmap);
+      DeleteDC(buffered);
       EndPaint(window, &paint);
       return 0;
     }
+    case WM_ERASEBKGND:
+      return 1;
     case WM_DESTROY:
       KillTimer(window, kUiTimer);
       DragAcceptFiles(window, FALSE);
@@ -1478,6 +1723,30 @@ int run_phase4_self_test(const std::filesystem::path& input,
   return 0;
 }
 
+int run_manual_stem_mix_self_test(const std::filesystem::path& input,
+                                  const std::filesystem::path& output_root) {
+  amt::codec::SndFileCodecService codecs;
+  if (!codecs.available()) return 50;
+  std::string error;
+  const auto report = amt::analysis::analyze_track(codecs, input, error);
+  if (!report) return 51;
+  auto plan = amt::mastering::plan_mastering(*report);
+  auto controls = amt::mastering::mastering_style_preset(
+      amt::mastering::MasteringStyle::balanced);
+  controls.stem_mix.drums_db = 1.0;
+  controls.stem_mix.bass_db = -1.0;
+  controls.stem_mix.vocals_db = 1.5;
+  amt::mastering::apply_mastering_controls(plan, controls);
+  const auto rendered = amt::mastering::render_mastering_plan(
+      codecs, input, output_root / "renders", report->technical, plan, error);
+  if (!rendered) return 52;
+  if (!std::filesystem::is_regular_file(
+          output_root / "manual-stem-mix" / "manual-stem-mix.wav")) {
+    return 53;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
@@ -1489,6 +1758,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   if (arguments && argument_count == 4 &&
       std::wstring(arguments[1]) == L"--phase4-self-test") {
     const int result = run_phase4_self_test(arguments[2], arguments[3]);
+    LocalFree(arguments);
+    return result;
+  }
+  if (arguments && argument_count == 4 &&
+      std::wstring(arguments[1]) == L"--manual-stem-mix-self-test") {
+    const int result = run_manual_stem_mix_self_test(arguments[2], arguments[3]);
     LocalFree(arguments);
     return result;
   }
@@ -1505,13 +1780,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   wc.lpszClassName = kWindowClass;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-  wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  wc.hbrBackground = nullptr;
   if (RegisterClassW(&wc) == 0) return 1;
 
   auto* state = new AppState();
   std::wstring title = L"AudioMasteringTool — ";
   title += widen_utf8(std::string(amt::core::version()));
-  HWND window = CreateWindowExW(0, kWindowClass, title.c_str(), WS_OVERLAPPEDWINDOW,
+  HWND window = CreateWindowExW(0, kWindowClass, title.c_str(),
+      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
       CW_USEDEFAULT, CW_USEDEFAULT, 1180, 840, nullptr, nullptr, instance, state);
   if (!window) {
     delete state;

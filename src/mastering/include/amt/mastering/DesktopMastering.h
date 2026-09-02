@@ -11,6 +11,7 @@ namespace amt::mastering {
 struct DesktopMasteringReport {
   bool source_diagnostics_performed{false};
   bool source_guidance_applied{false};
+  bool manual_stem_mix_applied{false};
   bool automatic_mode1_approved{false};
   std::string summary;
   std::string json;

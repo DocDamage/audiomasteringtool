@@ -1,8 +1,10 @@
 #include "amt/mastering/DesktopMastering.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -30,6 +32,167 @@ struct PreparedGuidance {
   bool analysis_performed{false};
   bool automatic_mode1_approved{false};
 };
+
+[[nodiscard]] bool stem_mix_requested(const StemMixControls& controls) {
+  return std::abs(controls.drums_db) >= 0.05 ||
+         std::abs(controls.bass_db) >= 0.05 ||
+         std::abs(controls.vocals_db) >= 0.05 ||
+         std::abs(controls.other_db) >= 0.05;
+}
+
+[[nodiscard]] double stem_gain_db(const StemMixControls& controls,
+                                  const amt::separation::StemRole role) {
+  switch (role) {
+    case amt::separation::StemRole::drums: return controls.drums_db;
+    case amt::separation::StemRole::bass: return controls.bass_db;
+    case amt::separation::StemRole::vocals: return controls.vocals_db;
+    case amt::separation::StemRole::other: return controls.other_db;
+    default: return 0.0;
+  }
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> render_manual_stem_mix(
+    amt::codec::ICodecService& codecs,
+    const std::filesystem::path& canonical_input,
+    const std::filesystem::path& output_directory,
+    const amt::separation::SeparationResult& separation,
+    const StemMixControls& controls,
+    std::string& error,
+    const amt::core::CancellationToken* cancellation,
+    const amt::core::ProgressCallback& progress) {
+  error.clear();
+  constexpr std::size_t kBlockFrames = 8192U;
+  const std::array<amt::separation::StemRole, 4> roles = {
+      amt::separation::StemRole::drums, amt::separation::StemRole::bass,
+      amt::separation::StemRole::other, amt::separation::StemRole::vocals};
+  std::array<std::filesystem::path, 4> stem_paths;
+  for (std::size_t index = 0; index < roles.size(); ++index) {
+    const auto artifact = std::find_if(
+        separation.artifacts.begin(), separation.artifacts.end(),
+        [&](const auto& candidate) {
+          return candidate.kind == amt::separation::CacheArtifactKind::stem_audio &&
+                 candidate.role == roles[index];
+        });
+    if (artifact == separation.artifacts.end()) {
+      error = "manual stem mixing requires drums, bass, vocals, and other audio";
+      return std::nullopt;
+    }
+    stem_paths[index] = artifact->path;
+  }
+
+  std::error_code directory_error;
+  const auto mix_directory = output_directory.parent_path() / "manual-stem-mix";
+  std::filesystem::create_directories(mix_directory, directory_error);
+  if (directory_error) {
+    error = "unable to create manual stem-mix directory: " +
+            directory_error.message();
+    return std::nullopt;
+  }
+  const auto model_rate_program = mix_directory / "program-model-rate.wav";
+  const auto model_rate_mix = mix_directory / "manual-stem-mix-model-rate.wav";
+  const auto final_mix = mix_directory / "manual-stem-mix.wav";
+
+  const auto source_metadata = codecs.probe(canonical_input, error);
+  if (!source_metadata || source_metadata->channels != 2 ||
+      source_metadata->sample_rate <= 0 || separation.sample_rate <= 0) {
+    if (error.empty()) error = "manual stem mixing requires valid stereo source audio";
+    return std::nullopt;
+  }
+  amt::codec::ExportRequest prepare_request;
+  prepare_request.sample_rate = separation.sample_rate;
+  prepare_request.container = amt::codec::AudioContainer::wav;
+  prepare_request.sample_format = amt::codec::AudioSampleFormat::float32;
+  if (!amt::codec::export_audio(
+          codecs, canonical_input, model_rate_program, prepare_request, error,
+          cancellation, [&](const double value) {
+            amt::core::report_progress(progress, value * 0.15);
+          })) {
+    return std::nullopt;
+  }
+
+  auto program = codecs.open_decoder(model_rate_program, error);
+  if (!program) return std::nullopt;
+  std::array<std::unique_ptr<amt::codec::IAudioDecoder>, 4> stems;
+  for (std::size_t index = 0; index < stems.size(); ++index) {
+    stems[index] = codecs.open_decoder(stem_paths[index], error);
+    if (!stems[index] ||
+        stems[index]->metadata().sample_rate != separation.sample_rate ||
+        stems[index]->metadata().channels != 2) {
+      if (error.empty()) error = "separation stem geometry is incompatible with manual mixing";
+      return std::nullopt;
+    }
+  }
+  auto encoder = codecs.open_encoder(
+      model_rate_mix,
+      {.sample_rate = separation.sample_rate,
+       .channels = 2,
+       .container = amt::codec::AudioContainer::wav,
+       .sample_format = amt::codec::AudioSampleFormat::float32,
+       .tags = {}},
+      error);
+  if (!encoder) return std::nullopt;
+
+  std::int64_t rendered_frames = 0;
+  while (true) {
+    if (cancellation != nullptr && cancellation->is_cancelled()) {
+      error = "manual stem mixing cancelled";
+      return std::nullopt;
+    }
+    amt::audio::AudioBuffer mixed;
+    std::size_t program_frames = 0U;
+    if (!program->read(mixed, kBlockFrames, program_frames, error, cancellation)) {
+      return std::nullopt;
+    }
+    std::array<amt::audio::AudioBuffer, 4> blocks;
+    for (std::size_t index = 0; index < stems.size(); ++index) {
+      std::size_t stem_frames = 0U;
+      if (!stems[index]->read(blocks[index], kBlockFrames, stem_frames, error,
+                              cancellation)) {
+        return std::nullopt;
+      }
+      if (stem_frames != program_frames) {
+        error = "manual stem mix encountered mismatched source/stem frame counts";
+        return std::nullopt;
+      }
+    }
+    if (program_frames == 0U) break;
+
+    for (std::size_t index = 0; index < stems.size(); ++index) {
+      const double delta = std::pow(10.0, stem_gain_db(controls, roles[index]) / 20.0) - 1.0;
+      if (std::abs(delta) < 1.0e-9) continue;
+      for (std::size_t channel = 0; channel < 2U; ++channel) {
+        for (std::size_t frame = 0; frame < program_frames; ++frame) {
+          const double value = static_cast<double>(mixed.channel(channel)[frame]) +
+                               static_cast<double>(blocks[index].channel(channel)[frame]) * delta;
+          mixed.channel(channel)[frame] = static_cast<float>(
+              std::clamp(std::isfinite(value) ? value : 0.0, -8.0, 8.0));
+        }
+      }
+    }
+    if (!encoder->write(mixed, error, cancellation)) return std::nullopt;
+    rendered_frames += static_cast<std::int64_t>(program_frames);
+    if (program->metadata().frames > 0) {
+      amt::core::report_progress(
+          progress, 0.15 + 0.70 * static_cast<double>(rendered_frames) /
+                               static_cast<double>(program->metadata().frames));
+    }
+  }
+  if (!encoder->finalize(error)) return std::nullopt;
+
+  amt::codec::ExportRequest restore_request;
+  restore_request.sample_rate = source_metadata->sample_rate;
+  restore_request.container = amt::codec::AudioContainer::wav;
+  restore_request.sample_format = amt::codec::AudioSampleFormat::float32;
+  if (!amt::codec::export_audio(
+          codecs, model_rate_mix, final_mix, restore_request, error,
+          cancellation, [&](const double value) {
+            amt::core::report_progress(progress, 0.85 + value * 0.15);
+          })) {
+    return std::nullopt;
+  }
+  amt::core::report_progress(progress, 1.0);
+  return final_mix;
+}
 
 [[nodiscard]] bool cancelled(
     const amt::core::CancellationToken* cancellation) noexcept {
@@ -204,13 +367,17 @@ void add_source_diagnostics(
 void fill_desktop_report(
     DesktopMasteringReport& report,
     const PreparedGuidance& prepared,
-    const SourceGuidedMasteringRenderPair& rendered) {
+    const SourceGuidedMasteringRenderPair& rendered,
+    const bool manual_stem_mix_applied) {
   report.source_diagnostics_performed = prepared.analysis_performed;
   report.source_guidance_applied = rendered.source_guidance_applied;
+  report.manual_stem_mix_applied = manual_stem_mix_applied;
   report.automatic_mode1_approved = prepared.automatic_mode1_approved;
 
   std::ostringstream summary;
-  if (!prepared.analysis_performed) {
+  if (manual_stem_mix_applied) {
+    summary << "Manual drums/bass/vocals/other stem balance was applied before mastering.";
+  } else if (!prepared.analysis_performed) {
     summary << "Source diagnostics were unavailable; canonical stereo mastering was used.";
   } else if (rendered.source_guidance_applied) {
     summary << "Source diagnostics completed and source-guided stereo processing was applied.";
@@ -231,6 +398,8 @@ void fill_desktop_report(
        << (report.source_diagnostics_performed ? "true" : "false") << ",\n"
        << "  \"sourceGuidanceApplied\": "
        << (report.source_guidance_applied ? "true" : "false") << ",\n"
+       << "  \"manualStemMixApplied\": "
+       << (report.manual_stem_mix_applied ? "true" : "false") << ",\n"
        << "  \"automaticMode1Approved\": "
        << (report.automatic_mode1_approved ? "true" : "false") << ",\n"
        << "  \"requestedMode\": \""
@@ -422,19 +591,40 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
     const amt::core::ProgressCallback& progress,
     DesktopMasteringReport* report) {
   error.clear();
+  const bool wants_manual_stem_mix = stem_mix_requested(plan.stem_mix);
   auto prepared = prepare_guidance(
       codecs, canonical_input, output_directory, source_analysis, error,
       cancellation,
       [&](const double value) {
-        amt::core::report_progress(progress, value * 0.35);
+        amt::core::report_progress(
+            progress, value * (wants_manual_stem_mix ? 0.30 : 0.35));
       });
   if (!prepared) return std::nullopt;
 
+  std::filesystem::path render_input = canonical_input;
+  if (wants_manual_stem_mix) {
+    if (!prepared->guidance.separation) {
+      error = "manual stem mixing was requested, but source separation is unavailable";
+      return std::nullopt;
+    }
+    auto mixed = render_manual_stem_mix(
+        codecs, canonical_input, output_directory,
+        *prepared->guidance.separation, plan.stem_mix, error, cancellation,
+        [&](const double value) {
+          amt::core::report_progress(progress, 0.30 + value * 0.25);
+        });
+    if (!mixed) return std::nullopt;
+    render_input = std::move(*mixed);
+    prepared->guidance.decision.mode =
+        amt::separation::SeparationMode::stereo_mastering;
+  }
+
   auto result = render_mastering_plan_with_source_guidance(
-      codecs, canonical_input, output_directory, source_analysis, plan,
+      codecs, render_input, output_directory, source_analysis, plan,
       prepared->guidance, prepared->issues, error, {}, settings, cancellation,
       [&](const double value) {
-        amt::core::report_progress(progress, 0.35 + value * 0.65);
+        const double start = wants_manual_stem_mix ? 0.55 : 0.35;
+        amt::core::report_progress(progress, start + value * (1.0 - start));
       });
   if (!result) return std::nullopt;
 
@@ -457,7 +647,10 @@ std::optional<MasteringRenderPair> render_mastering_plan_for_desktop(
 
   add_source_diagnostics(plan, prepared->issues,
                          result->source_guidance_applied);
-  if (report != nullptr) fill_desktop_report(*report, *prepared, *result);
+  if (report != nullptr) {
+    fill_desktop_report(*report, *prepared, *result,
+                        wants_manual_stem_mix);
+  }
   amt::core::report_progress(progress, 1.0);
   return std::move(result->masters);
 }

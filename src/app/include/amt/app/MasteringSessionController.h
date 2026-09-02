@@ -41,6 +41,18 @@ class MasteringSessionController {
       AuditionTarget target,
       std::string& error);
 
+  [[nodiscard]] bool apply_revision(
+      const std::string& natural_language_prompt,
+      std::string& error,
+      const amt::core::CancellationToken* cancellation = nullptr,
+      const amt::core::ProgressCallback& progress = {});
+
+  [[nodiscard]] bool run_translation_analysis(std::string& error);
+
+  void set_preference_profile(const std::string& profile_name) {
+    model_.active_preference_profile = profile_name;
+  }
+
   [[nodiscard]] bool export_selected(
       const std::string& recipe_id,
       const std::filesystem::path& destination_path,

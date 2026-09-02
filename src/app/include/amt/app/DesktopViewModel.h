@@ -69,6 +69,19 @@ struct TrackViewModel {
 
   AuditionTarget selected_candidate{AuditionTarget::master_a};
   DiagnosticSummary diagnostics;
+
+  // Phase 11 Revision
+  std::string last_revision_prompt;
+  std::string last_revision_explanation;
+
+  // Phase 12 Translation
+  double translation_overall_score{0.0};
+  double translation_small_speaker_score{0.0};
+  double translation_mono_score{0.0};
+  std::vector<std::string> translation_warnings;
+
+  // Phase 13 Preferences
+  std::string active_preference_profile{"default"};
 };
 
 }  // namespace amt::app

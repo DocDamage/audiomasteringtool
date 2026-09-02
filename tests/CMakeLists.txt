@@ -234,6 +234,51 @@ target_link_libraries(amt_phase10_reference_tests PRIVATE
 )
 add_test(NAME phase10_reference_mastering_and_my_sound COMMAND amt_phase10_reference_tests)
 
+add_executable(amt_phase11_revision_tests phase11_revision_tests.cpp)
+target_link_libraries(amt_phase11_revision_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_dsp
+  amt_mastering
+  amt_instruments
+  amt_revision
+)
+add_test(NAME phase11_natural_language_revision COMMAND amt_phase11_revision_tests)
+
+add_executable(amt_phase12_translation_tests phase12_translation_tests.cpp)
+target_link_libraries(amt_phase12_translation_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_dsp
+  amt_translation
+)
+add_test(NAME phase12_playback_translation_simulation COMMAND amt_phase12_translation_tests)
+
+add_executable(amt_phase13_preferences_tests phase13_preferences_tests.cpp)
+target_link_libraries(amt_phase13_preferences_tests PRIVATE
+  amt_core
+  amt_preferences
+)
+add_test(NAME phase13_preference_learning COMMAND amt_phase13_preferences_tests)
+
+add_executable(amt_phase14_batch_tests phase14_batch_tests.cpp)
+target_link_libraries(amt_phase14_batch_tests PRIVATE
+  amt_core
+  amt_audio
+  amt_codec
+  amt_analysis
+  amt_mastering
+  amt_batch
+)
+add_test(NAME phase14_album_batch_mastering COMMAND amt_phase14_batch_tests)
+
+add_executable(amt_phase15_hardening_tests phase15_hardening_tests.cpp)
+target_link_libraries(amt_phase15_hardening_tests PRIVATE
+  amt_core
+  amt_settings
+)
+add_test(NAME phase15_windows_standalone_hardening COMMAND amt_phase15_hardening_tests)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(

@@ -2,8 +2,8 @@
 
 **Repository:** `DocDamage/audiomasteringtool`  
 **Authoritative branch:** `main`  
-**Current product milestone:** `0.5.x` / Phase 5 source-guided mastering  
-**Primary production target:** Windows standalone `1.0`  
+**Current product milestone:** `1.0.0` / Complete Implementation (Phases 0–15 complete)  
+**Primary production target:** Windows standalone `1.0` (Verified on MSVC C++20 Release)  
 **Post-1.0 targets:** VST3/ARA-capable architecture, web, macOS, Linux  
 
 ---

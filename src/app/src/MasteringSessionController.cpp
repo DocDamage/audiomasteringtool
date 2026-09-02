@@ -3,8 +3,12 @@
 #include <fstream>
 #include <system_error>
 
-#include "amt/codec/SndFileDynamic.h"
+#include "amt/codec/SndFileCodec.h"
 #include "amt/mastering/DesktopMastering.h"
+#include "amt/revision/PlanEditor.h"
+#include "amt/revision/RevisionExplanation.h"
+#include "amt/revision/RevisionParser.h"
+#include "amt/translation/TranslationAnalyzer.h"
 
 namespace amt::app {
 
@@ -13,7 +17,7 @@ MasteringSessionController::MasteringSessionController(
     std::shared_ptr<amt::project::ProjectStore> store)
     : codecs_(std::move(codecs)), store_(std::move(store)) {
   if (!codecs_) {
-    codecs_ = amt::codec::create_sndfile_codec_service();
+    codecs_ = std::make_shared<amt::codec::SndFileCodecService>();
   }
   if (!store_) {
     store_ = std::make_shared<amt::project::ProjectStore>(
@@ -72,9 +76,9 @@ bool MasteringSessionController::open_source(
 
   analysis_ = *analysis;
   model_.has_analysis = true;
-  model_.integrated_lufs = analysis_->integrated_lufs;
-  model_.true_peak_dbtp = analysis_->true_peak_dbtp;
-  model_.loudness_range_lu = analysis_->loudness_range_lu;
+  model_.integrated_lufs = analysis_->loudness.integrated_lufs;
+  model_.true_peak_dbtp = analysis_->loudness.true_peak_dbtp;
+  model_.loudness_range_lu = analysis_->loudness.loudness_range_lu;
 
   state_ = AppState::idle;
   return true;
@@ -94,7 +98,7 @@ bool MasteringSessionController::run_mastering(
   state_ = AppState::mastering;
   auto plan = amt::mastering::plan_mastering(*analysis_);
   const auto output_dir = store_ && project_
-                              ? store_->root_directory() / project_->project_id / "renders"
+                              ? store_->root() / project_->project_id / "renders"
                               : std::filesystem::temp_directory_path() / "AudioMasteringTool" / "renders";
 
   std::error_code ec;
@@ -115,13 +119,13 @@ bool MasteringSessionController::run_mastering(
 
   model_.has_masters = true;
   model_.master_a_path = masters_->master_a.output_path;
-  model_.master_a_lufs = masters_->master_a.analysis.integrated_lufs;
-  model_.master_a_true_peak = masters_->master_a.analysis.true_peak_dbtp;
+  model_.master_a_lufs = masters_->master_a.analysis.loudness.integrated_lufs;
+  model_.master_a_true_peak = masters_->master_a.analysis.loudness.true_peak_dbtp;
   model_.master_a_rationale = plan_->master_a.rationale;
 
   model_.master_b_path = masters_->master_b.output_path;
-  model_.master_b_lufs = masters_->master_b.analysis.integrated_lufs;
-  model_.master_b_true_peak = masters_->master_b.analysis.true_peak_dbtp;
+  model_.master_b_lufs = masters_->master_b.analysis.loudness.integrated_lufs;
+  model_.master_b_true_peak = masters_->master_b.analysis.loudness.true_peak_dbtp;
   model_.master_b_rationale = plan_->master_b.rationale;
 
   model_.selected_candidate = AuditionTarget::master_a;
@@ -208,7 +212,7 @@ bool MasteringSessionController::export_selected(
 
   state_ = AppState::exporting;
   const auto export_req = amt::project::make_export_request(*recipe);
-  const auto result = amt::project::execute_export(
+  const auto result = amt::codec::export_audio(
       *codecs_, candidate_path, destination_path, export_req, error,
       cancellation, progress);
 
@@ -224,6 +228,107 @@ bool MasteringSessionController::export_selected(
   }
 
   state_ = AppState::ready;
+  return true;
+}
+
+bool MasteringSessionController::apply_revision(
+    const std::string& natural_language_prompt,
+    std::string& error,
+    const amt::core::CancellationToken* cancellation,
+    const amt::core::ProgressCallback& progress) {
+  error.clear();
+  if (!model_.has_masters || !plan_ || !masters_) {
+    error = "Mastering must be run before applying natural-language revisions";
+    return false;
+  }
+
+  amt::revision::RevisionParser parser;
+  auto intent = parser.parse(natural_language_prompt);
+  if (!intent.parsed_successfully) {
+    error = "Could not parse revision intent: " + intent.parse_error;
+    return false;
+  }
+
+  const auto& target_plan = (model_.selected_candidate == AuditionTarget::master_b)
+                                ? plan_->master_b
+                                : plan_->master_a;
+
+  auto edit_res = amt::revision::PlanEditor::apply_revision(target_plan, intent);
+  if (!edit_res.success) {
+    error = edit_res.error;
+    return false;
+  }
+
+  state_ = AppState::mastering;
+  const auto output_dir = store_ && project_
+                              ? store_->root() / project_->project_id / "renders"
+                              : std::filesystem::temp_directory_path() / "AudioMasteringTool" / "renders";
+
+  const auto rev_output = output_dir / (target_plan.id + "_revised.wav");
+  auto rendered = amt::mastering::render_candidate(
+      *codecs_, model_.source_path, rev_output, edit_res.revised_plan, error, {}, cancellation, progress);
+
+  if (!rendered) {
+    state_ = AppState::ready;
+    return false;
+  }
+
+  model_.last_revision_prompt = natural_language_prompt;
+  model_.last_revision_explanation = amt::revision::RevisionExplanation::generate_explanation(intent, edit_res);
+
+  if (model_.selected_candidate == AuditionTarget::master_b) {
+    masters_->master_b = *rendered;
+    plan_->master_b = edit_res.revised_plan;
+    model_.master_b_path = rendered->output_path;
+    model_.master_b_lufs = rendered->analysis.loudness.integrated_lufs;
+    model_.master_b_true_peak = rendered->analysis.loudness.true_peak_dbtp;
+  } else {
+    masters_->master_a = *rendered;
+    plan_->master_a = edit_res.revised_plan;
+    model_.master_a_path = rendered->output_path;
+    model_.master_a_lufs = rendered->analysis.loudness.integrated_lufs;
+    model_.master_a_true_peak = rendered->analysis.loudness.true_peak_dbtp;
+  }
+
+  if (project_ && store_) {
+    std::string save_err;
+    store_->append_revision(*project_, "revision", "Applied revision: " + natural_language_prompt,
+                            rendered->output_path, save_err);
+  }
+
+  state_ = AppState::ready;
+  return true;
+}
+
+bool MasteringSessionController::run_translation_analysis(std::string& error) {
+  error.clear();
+  if (!model_.has_masters || !masters_) {
+    error = "No mastered audio available for translation simulation";
+    return false;
+  }
+
+  const auto audio_path = (model_.selected_candidate == AuditionTarget::master_b)
+                              ? masters_->master_b.output_path
+                              : masters_->master_a.output_path;
+
+  auto decoder = codecs_->open_decoder(audio_path, error);
+  if (!decoder) {
+    return false;
+  }
+
+  amt::audio::AudioBuffer buffer(static_cast<std::size_t>(decoder->metadata().channels),
+                                 static_cast<std::size_t>(decoder->metadata().frames));
+  std::size_t frames_read = 0;
+  if (!decoder->read(buffer, static_cast<std::size_t>(decoder->metadata().frames), frames_read, error)) {
+    return false;
+  }
+
+  auto report = amt::translation::TranslationAnalyzer::analyze(buffer);
+  model_.translation_overall_score = report.overall_score;
+  model_.translation_small_speaker_score = report.small_speaker_score;
+  model_.translation_mono_score = report.mono_compatibility_score;
+  model_.translation_warnings = report.warnings;
+
   return true;
 }
 

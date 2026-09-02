@@ -13,6 +13,11 @@ target_link_libraries(amt_app PUBLIC
   amt_mastering
   amt_playback
   amt_project
+  amt_revision
+  amt_translation
+  amt_preferences
+  amt_batch
+  amt_settings
 )
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(amt_app)

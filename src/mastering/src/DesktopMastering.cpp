@@ -356,7 +356,10 @@ void fill_desktop_report(
   request.separation.request_time_frequency_masks = false;
 
   amt::separation::SourceGuidedWorkflowConfig workflow_config;
-  workflow_config.guidance.require_bundled_production_model_eligibility = true;
+  // This build is used privately and does not redistribute the downloaded
+  // weights. Keep truthful licence metadata without treating commercial
+  // redistribution eligibility as a prerequisite for local inference.
+  workflow_config.guidance.require_bundled_production_model_eligibility = false;
   workflow_config.guidance.enable_cache = true;
   workflow_config.guidance.compute_missing_source_fingerprint = true;
 

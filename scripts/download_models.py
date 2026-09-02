@@ -2,6 +2,7 @@
 """
 Downloads and verifies model weights defined in models/registry.json.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -31,9 +32,15 @@ def download_file(url: str, dest: Path, expected_sha256: str) -> bool:
 
     print(f"Downloading from {url} to {dest} ...")
     
+    last_percent = -1
+
     def reporthook(count, block_size, total_size):
+        nonlocal last_percent
         if total_size > 0:
-            percent = int(count * block_size * 100 / total_size)
+            percent = min(100, int(count * block_size * 100 / total_size))
+            if percent == last_percent:
+                return
+            last_percent = percent
             mb_done = (count * block_size) / (1024 * 1024)
             mb_total = total_size / (1024 * 1024)
             sys.stdout.write(f"\r  Progress: {percent:3d}% ({mb_done:.1f}/{mb_total:.1f} MB)")
@@ -61,6 +68,16 @@ def download_file(url: str, dest: Path, expected_sha256: str) -> bool:
     return True
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Download hash-pinned model artifacts for internal evaluation."
+    )
+    parser.add_argument(
+        "--allow-research-only",
+        action="store_true",
+        help="explicitly allow a model that is not approved for commercial use or redistribution",
+    )
+    args = parser.parse_args()
+
     root = Path(__file__).resolve().parents[1]
     registry_path = root / "models" / "registry.json"
     if not registry_path.exists():
@@ -83,6 +100,20 @@ def main():
         artifact_rel = model["artifact"]
         dest_path = root / "models" / artifact_rel
         url = known_urls.get(model_id)
+
+        production_allowed = (
+            model.get("commercialUseReviewed") is True
+            and model.get("commercialUse") is True
+            and model.get("redistributionReviewed") is True
+            and model.get("redistributionAllowed") is True
+        )
+        if not production_allowed and not args.allow_research_only:
+            print(
+                f"\nRefusing research-only model {model_id}; pass "
+                "--allow-research-only for an internal, non-distributed evaluation."
+            )
+            success = False
+            continue
 
         print(f"\nProcessing model: {model_id} (v{model['version']})")
         if not url:

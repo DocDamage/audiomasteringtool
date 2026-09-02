@@ -180,6 +180,10 @@ bool write_manifest(const SourceGuidedCalibrationRequest& request,
          << amt::separation::separation_mode_name(result.evidence_mode) << "\",\n"
          << "  \"sourceEstimatesAnalyzed\": "
          << (result.source_estimates_analyzed ? "true" : "false") << ",\n"
+         << "  \"separationProviderInvoked\": "
+         << (result.separation_provider_invoked ? "true" : "false") << ",\n"
+         << "  \"separationCacheHit\": "
+         << (result.separation_cache_hit ? "true" : "false") << ",\n"
          << "  \"guidedCandidateRendered\": "
          << (result.guided_candidate_rendered ? "true" : "false") << ",\n"
          << "  \"stereoMasterA\": \""
@@ -333,7 +337,9 @@ render_source_guided_calibration_pair(
   guidance_request.separation.request_time_frequency_masks = false;
 
   amt::separation::SourceGuidedWorkflowConfig workflow_config;
-  workflow_config.guidance.require_bundled_production_model_eligibility = true;
+  // Calibration is a private local evaluation path; it does not redistribute
+  // the downloaded model artifact.
+  workflow_config.guidance.require_bundled_production_model_eligibility = false;
   workflow_config.guidance.enable_cache = true;
   workflow_config.guidance.compute_missing_source_fingerprint = true;
 
@@ -347,6 +353,8 @@ render_source_guided_calibration_pair(
 
   SourceGuidedCalibrationResult result;
   result.source_estimates_analyzed = workflow->source_estimates_analyzed;
+  result.separation_provider_invoked = workflow->guidance.provider_invoked;
+  result.separation_cache_hit = workflow->guidance.cache_hit;
   result.evidence_mode = workflow->guidance.decision.mode;
   result.stereo_master_a = stereo->master_a.output_path;
   result.model_name = provider_config.manifest.model_name;

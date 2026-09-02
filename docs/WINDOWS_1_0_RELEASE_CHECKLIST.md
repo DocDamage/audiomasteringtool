@@ -31,13 +31,19 @@ Record the commit SHA and CI run links in the release record.
 
 ## Real model and worker acceptance
 
-- [ ] Delete the per-user model and complete a cold, pinned download.
-- [ ] Confirm exact byte count and SHA-256 before atomic publication.
-- [ ] Load the packaged ONNX Runtime DLLs from the staged release.
+- [x] Complete a cold, pinned research-only download.
+- [x] Confirm exact byte count and SHA-256 before atomic publication.
+- [x] Load the pinned ONNX Runtime DLLs beside the worker.
+- [x] Run real CPU inference on a deterministic stereo fixture and validate all
+      four finite, non-empty stem outputs.
+- [x] Verify identical second request is a cache hit without worker invocation.
+- [x] Verify changed-source and corrupt-metadata cache invalidation.
+- [x] Verify missing-worker, corrupt-model, unwritable-output, cancellation, and
+      timeout failures clean partial worker artifacts.
 - [ ] Run a real track through the packaged worker on CPU.
 - [ ] Verify finite, correctly shaped drums/bass/other/vocals output.
-- [ ] Verify identical second request is a cache hit.
-- [ ] Verify source, model, topology, and corrupt-metadata cache invalidation.
+- [ ] Verify model-identity and requested-topology cache invalidation with the
+      real provider (covered by deterministic unit tests only).
 - [ ] Verify missing internet, interrupted download, cancellation, worker crash,
       timeout, corrupt model, and insufficient-disk behavior.
 - [ ] Verify all optional failures preserve the source and retain stereo mastering.
@@ -101,6 +107,9 @@ powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1 `
 ```
 
 ## Documentation and legal
+
+These are future distribution gates and do not block the current private,
+non-distributed local build.
 
 - [x] Current product claims distinguish integrated and gated capabilities.
 - [x] Model acquisition, identity, provenance, and licence are documented.

@@ -11,7 +11,7 @@ tracked in `docs/WINDOWS_1_0_RELEASE_CHECKLIST.md`.
 | Core, audio buffers, metering, analysis | Integrated; automated coverage active |
 | Deterministic DSP and two-master rendering | Integrated; listening benchmark pending |
 | Project history, audition, desktop workflow | Integrated; clean-machine acceptance pending |
-| Trusted HTDemucs worker and diagnostics | Implemented and safety-gated; real Windows runtime matrix pending |
+| Trusted HTDemucs worker and diagnostics | Implemented and safety-gated; deterministic Windows runtime matrix passed, representative-track listening pending |
 | Automatic source-guided Mode 1 changes | Disabled pending declared listening/damage policy |
 | Mode 2 reconstruction | Excluded from the normal 1.0 desktop path |
 | 28-class instrument taxonomy | Contracts and tests exist; no production-approved detector |

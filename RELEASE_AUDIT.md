@@ -20,13 +20,17 @@ Automatic Mode 1 remains safely disabled.
 - Local MSVC Debug and Release builds succeed with all 36 tests passing.
 - Native Windows Media Foundation MP3 and AAC/M4A round trips pass.
 - The staged worker IPC and deterministic desktop pipeline self-tests pass.
+- Real HTDemucs cold installation, pinned ONNX Runtime CPU inference, cache
+  reuse/invalidation, cancellation, timeout, and common failure cleanup pass on
+  Windows using the deterministic audio fixture.
 - A dirty-tree portable packaging rehearsal completes and its full checksum
   manifest verifies.
 
 ## Evidence still required
 
 - Clean MSVC Debug and Release results and CI checks for the final commit.
-- Real HTDemucs cold-start, inference, cache, cancellation, and fallback matrix.
+- A representative real music track listening/quality run through HTDemucs,
+  plus interrupted-network and true disk-exhaustion tests.
 - Predeclared listening/damage-policy evidence before Mode 1 can be enabled.
 - A production-approved instrument detector and calibration evidence before
   exact 28-class instrument claims can be enabled.

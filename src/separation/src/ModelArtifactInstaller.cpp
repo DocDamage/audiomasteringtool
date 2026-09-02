@@ -35,7 +35,7 @@ struct TrustedModelArtifact {
 constexpr TrustedModelArtifact kTrustedModels[] = {
     {.model_name = "htdemucs-onnx-fp16weights",
      .model_version = "d54ed9eb60e258ea82131c6ee14578628816456a",
-     .sha256 = "d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a",
+     .sha256 = "d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a",
      .size_bytes = 165612636U,
      .url = "https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/d54ed9eb60e258ea82131c6ee14578628816456a/htdemucs_fp16weights.onnx?download=true"},
 };
@@ -91,7 +91,11 @@ bool verify_existing_artifact(const WorkerSeparationProviderConfig& config,
   valid = false;
   std::error_code exists_error;
   if (!std::filesystem::is_regular_file(config.model_artifact, exists_error)) {
-    if (exists_error) {
+    // Windows reports ERROR_PATH_NOT_FOUND when a fresh model store's parent
+    // hierarchy does not exist yet. That is the expected cold-install state,
+    // not an inspection failure.
+    if (exists_error &&
+        exists_error != std::errc::no_such_file_or_directory) {
       error = "unable to inspect configured model artifact: " +
               exists_error.message();
       return false;

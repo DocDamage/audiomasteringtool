@@ -19,6 +19,16 @@ if(WIN32)
   )
   add_test(NAME windows_media_foundation_lossy_codecs
     COMMAND amt_windows_media_foundation_codec_tests)
+
+  # Manual acceptance executable: requires the separately downloaded real
+  # model and is intentionally not part of ordinary/offline CTest.
+  add_executable(amt_windows_real_model_failure_acceptance
+    windows_real_model_failure_acceptance.cpp)
+  target_link_libraries(amt_windows_real_model_failure_acceptance PRIVATE
+    amt_core
+    amt_codec
+    amt_separation
+  )
 endif()
 
 add_executable(amt_phase1_tests phase1_tests.cpp)

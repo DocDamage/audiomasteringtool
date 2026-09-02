@@ -359,6 +359,10 @@ int main(int argc, char** argv) {
               << amt::separation::separation_mode_name(result->evidence_mode) << '\n'
               << "Source estimates analyzed: "
               << (result->source_estimates_analyzed ? "yes" : "no") << '\n'
+              << "Separation provider invoked: "
+              << (result->separation_provider_invoked ? "yes" : "no") << '\n'
+              << "Separation cache hit: "
+              << (result->separation_cache_hit ? "yes" : "no") << '\n'
               << "Stereo Master A: " << result->stereo_master_a.string() << '\n'
               << "Guided candidate rendered: "
               << (result->guided_candidate_rendered ? "yes" : "no") << '\n';

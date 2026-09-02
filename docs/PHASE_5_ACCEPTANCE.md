@@ -126,7 +126,7 @@ The worker includes:
 Registry model: `htdemucs-onnx-fp16weights`
 
 - pinned revision: `d54ed9eb60e258ea82131c6ee14578628816456a`
-- pinned SHA-256: `d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a`
+- pinned SHA-256: `d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a`
 - pinned size: `165612636` bytes
 - sample rate: `44100 Hz`
 - input tensor: `mix`

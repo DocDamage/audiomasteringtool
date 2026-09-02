@@ -1,8 +1,8 @@
 # Model licences and provenance
 
 AudioMasteringTool does not embed model weights in the repository, portable
-archive, or installer. The Windows application can download an approved artifact
-on demand into the user's local application-data directory.
+archive, or installer. This private local build can download the configured
+artifact on demand into the user's local application-data directory.
 
 ## HTDemucs ONNX FP16 weights
 
@@ -10,17 +10,19 @@ on demand into the user's local application-data directory.
 - Source: `StemSplitio/htdemucs-onnx`, converted from Meta Demucs HTDemucs
 - Pinned revision: `d54ed9eb60e258ea82131c6ee14578628816456a`
 - Artifact: `htdemucs_fp16weights.onnx`
-- SHA-256: `d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a`
+- SHA-256: `d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a`
 - Declared code licence: MIT
-- Declared weights licence: MIT
-- Distribution model: user-initiated, hash-verified download; not redistributed
-  inside the AudioMasteringTool package
+- Weight-use status: the upstream Demucs maintainer describes pretrained
+  weights as scientific-purpose-only rather than MIT-covered
+- Current scope: private, local, non-distributed use
+- Distribution model: user-initiated, hash-verified download; never embedded in
+  the AudioMasteringTool package
 
 The machine-readable authority is `models/registry.json`, and the hard-coded
 trusted download identity in `ModelArtifactInstaller.cpp` must match it exactly.
 Automatic source-guided Mode 1 changes remain disabled until AudioMasteringTool's
-own listening/damage policy passes; the upstream model benchmark is not a
-substitute for product acceptance.
+own listening/damage policy passes. If this tool is later distributed or used
+commercially, replace the model or obtain explicit permission before release.
 
 ## Instrument classification
 

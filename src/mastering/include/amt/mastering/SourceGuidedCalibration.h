@@ -24,6 +24,8 @@ struct SourceGuidedCalibrationRequest {
 
 struct SourceGuidedCalibrationResult {
   bool source_estimates_analyzed{false};
+  bool separation_provider_invoked{false};
+  bool separation_cache_hit{false};
   bool guided_candidate_rendered{false};
   amt::separation::SeparationMode evidence_mode{
       amt::separation::SeparationMode::stereo_mastering};

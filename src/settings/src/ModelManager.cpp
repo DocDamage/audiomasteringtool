@@ -120,7 +120,7 @@ std::vector<InstalledModelInfo> ModelManager::list_installed_models() const {
     default_entry.name = "StemSplitio/htdemucs-onnx";
     default_entry.version = "d54ed9eb60e258ea82131c6ee14578628816456a";
     default_entry.artifact = "htdemucs-onnx/htdemucs_fp16weights.onnx";
-    default_entry.sha256 = "d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a";
+    default_entry.sha256 = "d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a";
     entries.push_back(default_entry);
   }
 

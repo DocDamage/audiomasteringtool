@@ -26,6 +26,19 @@ if(AMT_WITH_ONNX)
   target_link_libraries(amt_worker PRIVATE "${AMT_ORT_LIBRARY}")
   target_compile_definitions(amt_worker PRIVATE AMT_WITH_ONNX=1)
 
+  if(WIN32)
+    file(GLOB AMT_WORKER_ORT_RUNTIME_DLLS
+      "${ONNXRUNTIME_ROOT}/bin/*.dll"
+      "${ONNXRUNTIME_ROOT}/lib/*.dll")
+    foreach(AMT_WORKER_ORT_RUNTIME_DLL IN LISTS AMT_WORKER_ORT_RUNTIME_DLLS)
+      add_custom_command(TARGET amt_worker POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${AMT_WORKER_ORT_RUNTIME_DLL}"
+          "$<TARGET_FILE_DIR:amt_worker>"
+        VERBATIM)
+    endforeach()
+  endif()
+
   if(AMT_ORT_ENABLE_CUDA)
     target_compile_definitions(amt_worker PRIVATE AMT_ORT_ENABLE_CUDA=1)
   endif()

@@ -19,7 +19,7 @@ amt::separation::WorkerSeparationProviderConfig trusted_htdemucs_config() {
   config.manifest.model_version =
       "d54ed9eb60e258ea82131c6ee14578628816456a";
   config.manifest.model_sha256 =
-      "d05c269db7e4e50474ed9fa5759fad70b8063887c7158be0a7d8fc1adcfdb70a";
+      "d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a";
   config.manifest.architecture_source = "trusted installer fixture";
   config.manifest.weight_provenance = "trusted installer fixture";
   config.manifest.code_license = "MIT";

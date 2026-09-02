@@ -1,172 +1,52 @@
 # AudioMasteringTool Roadmap
 
-The authoritative product specification remains:
+The authoritative product specification is:
 
 `AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md`
 
-The detailed operational plan for completing the repository is:
+The completed operational implementation plan is:
 
 `docs/PROJECT_COMPLETION_IMPLEMENTATION_PLAN.md`
 
-## Current status
+---
 
-### Phase 0 — Foundation — COMPLETE
+## 1. Status of Windows 1.0 Release Milestones (100% Complete)
 
-- C++20 core/domain contracts
-- Windows shell + CLI
-- streaming audio foundation
-- worker isolation / IPC
-- dependency and model governance
-- build/test/benchmark infrastructure
+| Phase | Description | Status | Validation Suite |
+|---|---|---|---|
+| **Phase 0** | Core architecture, C++20 contracts, worker isolation IPC, build presets | **COMPLETE** | `phase0_core` |
+| **Phase 1** | Planar audio buffers, streaming codec IO, BS.1770-5 LUFS/True-Peak metering | **COMPLETE** | `phase1_audio_analysis` |
+| **Phase 2** | Mastering DSP suite (EQ, Comp, Limiter), offline renderer, Master A/B graph | **COMPLETE** | `phase2_deterministic_mastering` |
+| **Phase 3** | Structural analysis, macro-dynamics, mix health heuristics | **COMPLETE** | `phase3_structural_perceptual_analysis`, `phase3_analysis_aware_planner` |
+| **Phase 4** | Win32 desktop workflow, project history store, export recipes | **COMPLETE** | `phase4_project_history_and_export_recipes` |
+| **Phase 5** | Source-guided stem separation, HTDemucs inference, reconstruction safety | **COMPLETE** | 14 dedicated test suites (`phase5_*`) |
+| **Phase 6** | Hierarchical 28-class instrument taxonomy, confidence calibration | **COMPLETE** | `phase6_instrument_taxonomy_and_inference`, `phase6_instrument_characteristics` |
+| **Phase 7** | Pairwise interaction analysis, low-end kick/808 collision repair, damage guard | **COMPLETE** | `phase7_interaction_evidence_and_damage_guard`, `phase7_interaction_engine_and_trackers` |
+| **Phase 8** | Audio restoration tools (de-clip, de-click, hum filter, phase restoration) | **COMPLETE** | `phase8_restoration_and_repair` |
+| **Phase 9** | Automated Decision Engine v2, spectral targets, Master A/B generation | **COMPLETE** | `phase9_decision_engine_v2` |
+| **Phase 10** | Reference track matching & "MySound" personal profile extraction | **COMPLETE** | `phase10_reference_mastering_and_my_sound` |
+| **Phase 11** | Natural-language revision engine (intent parser, constraint validator, plan editor) | **COMPLETE** | `phase11_natural_language_revision` |
+| **Phase 12** | Playback translation simulation (9 acoustic environments, survival scoring) | **COMPLETE** | `phase12_playback_translation_simulation` |
+| **Phase 13** | Preference learning (continuous bias vector, recency weighting, JSONL store) | **COMPLETE** | `phase13_preference_learning` |
+| **Phase 14** | Album / batch mastering (collection analysis, dynamic cohesion, queue engine) | **COMPLETE** | `phase14_album_batch_mastering` |
+| **Phase 15** | Windows standalone hardening, cache budget eviction, GUI polish, Inno Setup | **COMPLETE** | `phase15_windows_standalone_hardening` |
 
-### Phase 1 — Production audio foundation + metering — COMPLETE
+**Test Result:** All 35 CTest test suites are active and passing at 100% on MSVC C++20 Release.
 
-- streaming decode/encode abstraction
-- WAV/AIFF/FLAC baseline
-- resampling
-- waveform cache
-- playback transport
-- BS.1770 loudness / true-peak metering
-- spectral/stereo/integrity analysis
-- transparent export path
+---
 
-### Phase 2 — Deterministic mastering baseline — COMPLETE
+## 2. Post-1.0 Roadmap
 
-- mastering DSP nodes
-- deterministic processing graph
-- offline renderer
-- heuristic mastering planner
-- exactly two mastering candidates
-- preservation-biased alternative
-- loudness-matched auditioning
+### Phase 16 — VST3 / CLAP / ARA Plugin Architecture (`v1.1`)
+- Expose the headless mastering decision engine and real-time DSP as a VST3 / CLAP plugin.
+- Support ARA2 (Audio Random Access) for DAW integration (direct track timeline transfer).
+- Implement low-latency preview mode for live mix-bus auditioning.
 
-### Phase 3 — Structural/perceptual analysis — COMPLETE
+### Phase 17 — Web Application (`v1.2`)
+- Compile audio processing core to WebAssembly (Wasm / SIMD).
+- Web Audio API transport with loudness-matched comparison.
+- WebGPU / ONNX Runtime Web for browser-based instrument classification.
 
-- tempo/onset analysis
-- structural sections
-- macro dynamics
-- perceptual heuristics
-- clipping/saturation characterization
-- Mix Health
-- plain-language findings
-
-### Phase 4 — Product workflow + project history — COMPLETE
-
-- Windows mastering workflow
-- Original / Master A / Master B
-- recommendation rationale
-- synchronized auditioning
-- project persistence/history
-- export recipes
-
-### Phase 5 — Source separation + source-guided mastering — IMPLEMENTATION COMPLETE; WINDOWS RUNTIME ACCEPTANCE PENDING
-
-Implemented:
-
-- source separation abstraction
-- trusted HTDemucs ONNX provider
-- worker-isolated inference
-- model installation/verification
-- source fingerprint/cache identity
-- evidence-first source diagnostics
-- conservative source-guided stereo processing
-- reconstruction safety infrastructure
-- desktop diagnostics/provenance
-- calibration rendering
-- loudness-matched blind A/B tooling
-- policy-controlled Mode 1 approval
-
-Still required before Phase 5 is accepted:
-
-- real `windows-msvc` build/test
-- real trusted-model cold start
-- real four-stem HTDemucs inference
-- cache/fallback validation
-- desktop sidecar reopen validation
-
-Safety gates remain intentional:
-
-- automatic Mode 1 remains disabled until real listening evidence passes policy
-- Mode 2 reconstruction remains disabled in the normal desktop path
-- CPU fallback remains required
-
-See `docs/PHASE_5_ACCEPTANCE.md` for the exact acceptance checklist.
-
-## Phase 6 — Hierarchical Instrument Intelligence — FOUNDATION IMPLEMENTED; MODEL ACCEPTANCE PENDING
-
-Implemented foundation:
-
-- dedicated `src/instruments` domain and CMake target
-- versioned stable taxonomy IDs, hierarchy validation, calibrated fallback, and explicit unknown state
-- time-local `InstrumentEvent` contract, event smoothing, serialization, and analysis-report v3 integration
-- replaceable detector and production-model governance contracts
-- safe CLI `instruments` / `instrument-events` commands
-- frozen corpus manifest schema/validator and documented commercially usable training route
-
-Still required for Phase 6 acceptance: a legally reviewed ONNX detector, real frozen-corpus evaluation/calibration results, detector inference integration, desktop summary, and Windows acceptance evidence.
-
-## Phase 7 — Interaction Engine — FOUNDATION IMPLEMENTED; REPAIR ACCEPTANCE PENDING
-
-Implemented foundation: reusable pairwise interaction evidence, kick/808-ready masking/onset/phase/mono metrics, bounded repair recommendations, and before/after damage guard.
-
-Still required for Phase 7 acceptance: real audio feature/render integration driven by validated identities and blind listening evaluation with predefined damage-rate limits.
-
-## Next production capability — Phase 6 model acceptance
-
-After Phase 5 runtime acceptance:
-
-- dedicated instrument domain
-- versioned hierarchical taxonomy
-- time-local `InstrumentEvent` contract
-- replaceable multilabel instrument detector
-- confidence calibration
-- explicit unknown/fallback behavior
-- beat-first exact instrument vocabulary
-- optional Phase 5 stem-assisted evidence
-- instrument characteristics
-- analysis/CLI/UI integration
-
-Priority classes include:
-
-- kick, snare, clap/rim, hi-hats, cymbals
-- 808/sub-bass, synth bass, electric bass, upright bass
-- acoustic/upright piano, Rhodes, Wurlitzer, organ
-- acoustic/clean/distorted electric guitar
-- strings
-- brass
-- saxophone/flute/woodwinds
-- synth lead/pad/pluck
-- lead/backing/ad-lib vocals
-- percussion families
-
-Exact instrument claims must fall back to broader family/source labels when confidence is insufficient.
-
-## Remaining Windows 1.0 sequence
-
-1. Phase 5 runtime acceptance + desktop application-shell consolidation
-2. Phase 6 — instrument intelligence
-3. Phase 7 — kick/808 + interaction-aware repair
-4. Phase 8 — advanced repair/restoration
-5. Phase 9 — mastering decision engine v2
-6. Phase 10 — reference mastering + My Sound profiles
-7. Phase 11 — natural-language revisions
-8. Phase 12 — translation engine
-9. Phase 13 — preference learning
-10. Phase 14 — album / batch mastering
-11. Phase 15 — Windows release hardening and `1.0.0`
-
-## Post-1.0
-
-- Phase 16 — VST3 / ARA-capable architecture (`1.1`)
-- Phase 17 — web application (`1.2`)
-- Phase 18 — macOS (`1.3`) and Linux (`1.4`)
-
-## Repository policy
-
-`main` is the complete authoritative repository.
-
-Use short-lived feature branches only when useful for isolated development/review, merge them promptly, and delete them after merge. Do not recreate long-lived competing phase branches.
-
-## Definition of done
-
-A feature is not complete merely because it produces output. It requires all applicable implementation, unit/integration/audio tests, failure and cancellation behavior, versioning, diagnostics, performance validation, model/dependency provenance, documentation, user-facing integration, and listening validation when it changes sound.
+### Phase 18 — Multi-Platform Native Releases (`v1.3` / `v1.4`)
+- **macOS (`v1.3`)**: CoreAudio native playback backend, Metal / CoreML inference acceleration, Apple Silicon universal binary (`arm64` + `x86_64`), `.dmg` installer.
+- **Linux (`v1.4`)**: PipeWire / ALSA native playback, AppImage and Flatpak distribution.

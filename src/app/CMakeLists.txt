@@ -22,11 +22,15 @@ target_link_libraries(amt_app PUBLIC
 include(${CMAKE_SOURCE_DIR}/cmake/ProjectWarnings.cmake)
 amt_enable_warnings(amt_app)
 
-add_executable(audiomasteringtool WIN32 Phase5Main.cpp)
+add_executable(audiomasteringtool WIN32 main.cpp)
 target_link_libraries(audiomasteringtool PRIVATE amt_core amt_app)
 amt_enable_warnings(audiomasteringtool)
 
+
 if(WIN32)
+  target_sources(audiomasteringtool PRIVATE
+    windows/AudioMasteringTool.rc
+  )
   target_link_libraries(audiomasteringtool PRIVATE
     amt_codec
     amt_analysis
@@ -38,6 +42,10 @@ if(WIN32)
     shell32
   )
   target_compile_definitions(audiomasteringtool PRIVATE UNICODE _UNICODE)
+  if(MSVC)
+    target_link_options(audiomasteringtool PRIVATE
+      "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/windows/AudioMasteringTool.manifest")
+  endif()
 
   add_dependencies(audiomasteringtool amt_worker)
   add_custom_command(TARGET audiomasteringtool POST_BUILD

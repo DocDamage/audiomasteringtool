@@ -71,15 +71,16 @@ jobs:
           & $cli verify build/phase0-fixtures/sine_pcm16.flac "$env:RUNNER_TEMP/amt-roundtrip.flac"
       - name: Generate Phase 1 fixtures
         run: python scripts/generate_phase1_fixtures.py build/phase1-fixtures
-      - name: Phase 1 desktop app pipeline self-test
+      - name: Desktop app pipeline self-test
         shell: pwsh
         run: |
           $app = 'build/windows-msvc/src/app/Debug/audiomasteringtool.exe'
           $source = 'build/phase1-fixtures/tone_stereo_pcm24_48000.wav'
-          $output = Join-Path $env:RUNNER_TEMP 'amt-app-self-test.wav'
-          $process = Start-Process -FilePath $app -ArgumentList @('--phase1-self-test', $source, $output) -Wait -PassThru
+          $projectRoot = Join-Path $env:RUNNER_TEMP 'amt-app-self-test'
+          $process = Start-Process -FilePath $app -ArgumentList @('--phase4-self-test', $source, $projectRoot) -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "desktop app self-test failed with exit code $($process.ExitCode)" }
-          if (-not (Test-Path $output)) { throw 'desktop app self-test did not write output' }
+          $renders = @(Get-ChildItem -LiteralPath $projectRoot -Recurse -File -Filter '*.wav')
+          if ($renders.Count -lt 2) { throw 'desktop app self-test did not persist both mastered candidates' }
       - name: Phase 1 analysis and transparent format round trips
         shell: pwsh
         run: |

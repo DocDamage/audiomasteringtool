@@ -1,27 +1,45 @@
 # Third-party notices
 
-Third-party dependencies are tracked in `third_party/dependencies.json`. Every production dependency must have a pinned version/provenance decision and its redistribution obligations must remain reviewable.
+The machine-readable dependency inventory is
+`third_party/dependencies.json`. Release packaging includes this file and the
+available licence texts under `licenses/`.
 
 ## libsndfile 1.2.2
 
-Phase 1 uses libsndfile through runtime dynamic loading behind the production `ICodecService` boundary for the controlled WAV/AIFF/FLAC foundation. The Phase 0 bit-exact compatibility adapter remains present while the migration is validated.
+The packaged `sndfile.dll` provides WAV, AIFF, and FLAC streaming through the
+`ICodecService` boundary. The Windows archive is pinned by SHA-256 in the
+dependency inventory.
 
-libsndfile is LGPL-2.1-or-later. Distribution of a runtime with the product must include the required LGPL notices/source/relinking compliance appropriate to the selected packaging model. The verified Windows x64 artifact and SHA-256 are recorded in `third_party/dependencies.json`.
+libsndfile is licensed under LGPL-2.1-or-later. A production distribution must
+satisfy the applicable notice, source-availability, and relinking/replacement
+obligations. Final legal approval remains a release gate.
 
 ## libebur128 1.2.6
 
-Phase 1 pins libebur128 commit `67b33abe1558160ed76ada1322329b0e9e058b02` and builds it as a static dependency of `amt_analysis` for BS.1770-family loudness/sample-peak/true-peak measurement and EBU loudness range.
+Pinned commit `67b33abe1558160ed76ada1322329b0e9e058b02` is built statically for
+BS.1770-family loudness and true-peak measurement. libebur128 is MIT licensed;
+its licence text is retained in `third_party/licenses/libebur128-COPYING.txt`.
 
-libebur128 is MIT licensed. Its license text is retained at `third_party/licenses/libebur128-COPYING.txt`.
+## ONNX Runtime 1.26.0
 
-## ONNX Runtime 1.29.0
+The Windows production build packages the pinned CPU runtime for isolated source-
+separation worker inference. ONNX Runtime is MIT licensed. Its required upstream
+copyright/licence notice must be included in final release artifacts.
 
-Used by the optional inference spike. ONNX Runtime is MIT licensed. Production redistribution must retain its required copyright/license notice.
+## Windows Media Foundation
 
-## JUCE 8.0.15
+MP3 and AAC/M4A decode and encode use the Media Foundation components supplied
+with supported Windows installations. No Media Foundation binary is redistributed
+by this project. OGG/Vorbis and Opus are not claimed as standard Windows 1.0
+formats.
 
-Evaluation spike only; not included in the default application path. JUCE 8 modules are dual-licensed under AGPLv3 and a commercial JUCE licence. Production adoption remains blocked until the project explicitly selects a compatible licence path.
+## HTDemucs model
 
-## FFmpeg
+Model weights are downloaded on demand rather than redistributed in the package.
+See `MODEL_LICENSES.md` and `models/registry.json` for the pinned identity,
+declared licensing, provenance, and safety gate.
 
-Not included in Phase 1. It remains the broad-codec candidate for MP3/AAC/M4A/OGG/Opus where libsndfile is not the selected production path. If adopted, the exact build configuration and license obligations must be recorded; GPL/nonfree components must never be silently inherited by a distribution build.
+## Evaluation-only dependencies
+
+JUCE and FFmpeg appear only in evaluation/spike or future-strategy records and
+are not linked into or distributed with the Windows 1.0 application.

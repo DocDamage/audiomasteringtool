@@ -218,7 +218,7 @@ bool download_trusted_artifact(const TrustedModelArtifact& trusted,
   }
 
   InternetHandle session(WinHttpOpen(
-      L"AudioMasteringTool/0.5 model-installer",
+      L"AudioMasteringTool/1.0 model-installer",
       WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
       WINHTTP_NO_PROXY_NAME,
       WINHTTP_NO_PROXY_BYPASS,

@@ -6,8 +6,10 @@
 namespace amt::settings {
 
 std::string CrashReporting::sanitize_path(const std::filesystem::path& path) {
-  // Strip user directories (e.g. C:\Users\<name>\... -> <USER_DIR>\...)
+  // Strip user directories (e.g. C:\Users\<name>\... -> <USER_DIR>\... or /home/<name>/...)
   std::string s = path.string();
+
+  // Windows backslash pattern
   auto pos = s.find("Users\\");
   if (pos != std::string::npos) {
     auto next_slash = s.find('\\', pos + 6);
@@ -15,6 +17,24 @@ std::string CrashReporting::sanitize_path(const std::filesystem::path& path) {
       s = s.substr(0, pos) + "Users\\<SANITIZED>" + s.substr(next_slash);
     }
   }
+
+  // Windows / Unix forward slash pattern
+  auto pos_fwd = s.find("Users/");
+  if (pos_fwd != std::string::npos) {
+    auto next_slash = s.find('/', pos_fwd + 6);
+    if (next_slash != std::string::npos) {
+      s = s.substr(0, pos_fwd) + "Users/<SANITIZED>" + s.substr(next_slash);
+    }
+  }
+
+  auto pos_home = s.find("/home/");
+  if (pos_home != std::string::npos) {
+    auto next_slash = s.find('/', pos_home + 6);
+    if (next_slash != std::string::npos) {
+      s = s.substr(0, pos_home) + "/home/<SANITIZED>" + s.substr(next_slash);
+    }
+  }
+
   return s;
 }
 
@@ -31,6 +51,10 @@ bool CrashReporting::record_crash_log(
 
   std::error_code ec;
   std::filesystem::create_directories(log_dir, ec);
+  if (ec) {
+    error = "Cannot create crash directory: " + ec.message();
+    return false;
+  }
 
   auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch())
@@ -44,8 +68,8 @@ bool CrashReporting::record_crash_log(
   }
 
   out << "Timestamp: " << ts << "\n"
-      << "Context: " << context_info << "\n"
-      << "Error: " << error_details << "\n";
+      << "Context: " << sanitize_path(context_info) << "\n"
+      << "Error: " << sanitize_path(error_details) << "\n";
 
   return true;
 }

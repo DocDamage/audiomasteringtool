@@ -24,18 +24,23 @@
     },
     {
       "name": "ONNX Runtime",
-      "version": "1.29.0",
-      "purpose": "C++ CPU/CUDA inference spike; intended production inference abstraction",
-      "source": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
-      "integration": "spike only in Phase 0",
+      "version": "1.26.0",
+      "purpose": "C++ CPU/CUDA inference worker backend for source separation and instrument inference",
+      "source": "https://github.com/microsoft/onnxruntime/releases/tag/v1.26.0",
+      "integration": "optional isolated worker execution provider managed via CMake and worker process",
       "license": "MIT",
-      "productionStatus": "candidate",
-      "windowsCpuArtifact": "onnxruntime-win-x64-1.29.0.zip",
-      "windowsCpuSha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
-      "windowsCuda12Artifact": "onnxruntime-win-x64-gpu_cuda12-1.29.0.zip",
-      "windowsCuda12Sha256": "3526773ba1fef5849a3e9d18558d87bbbb75b0db3ddcde4f08694a746ac3169f",
-      "windowsCuda13Artifact": "onnxruntime-win-x64-gpu_cuda13-1.29.0.zip",
-      "windowsCuda13Sha256": "0d2ab3feb9ed0ae68ccbbf2013ac87ad58a3b31bc8b28c5854f2ccacecbd8d90"
+      "productionStatus": "phase5-production-candidate",
+      "windowsCpuArtifact": "onnxruntime-win-x64-1.26.0.zip",
+      "windowsCpuSha256": "6ebe99b5564bf4d029b6e93eac9ff423682b6212eade769e9ca3f685eaf500b4"
+    },
+    {
+      "name": "Windows Media Foundation",
+      "version": "Windows system component",
+      "purpose": "Windows-native MP3 and AAC/M4A decode and encode",
+      "source": "Microsoft Windows SDK",
+      "integration": "system APIs linked through mfplat, mfreadwrite, mfuuid, and propsys; no runtime binary redistributed by this project",
+      "license": "Microsoft Windows system component terms",
+      "productionStatus": "windows-production-system-component"
     },
     {
       "name": "JUCE",

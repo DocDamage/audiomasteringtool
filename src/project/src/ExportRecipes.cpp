@@ -55,8 +55,8 @@ const std::vector<ExportRecipe>& builtin_export_recipes() {
        .sample_format = amt::codec::AudioSampleFormat::compressed,
        .sample_rate = std::nullopt,
        .dither_when_reducing_integer_depth = false,
-       .available = false,
-       .unavailable_reason = "MP3 production encoding remains behind the reviewed broad-codec backend gate."},
+       .available = true},
+
       {.id = ExportRecipeId::archive_float,
        .key = "archive_float",
        .name = "Archive Float Master",

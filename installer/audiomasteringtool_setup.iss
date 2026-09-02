@@ -13,7 +13,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=auto
 OutputDir=..\dist
@@ -22,7 +22,12 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64
-ChangesAssociations=yes
+ArchitecturesAllowed=x64compatible
+ChangesAssociations=no
+PrivilegesRequired=lowest
+CloseApplications=yes
+RestartApplications=no
+UninstallDisplayName={#MyAppName} {#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -31,23 +36,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\build\win\src\app\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\build\win\src\worker\Release\amt_worker.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\build\win\src\cli\Release\amt_cli.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\models\*"; DestDir: "{localappdata}\AudioMasteringTool\models"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\AudioMasteringTool-1.0.0-win64\*"; DestDir: "{app}"; Excludes: "SHA256SUMS.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; The packaged model registry intentionally lives beside the executable at
+; {app}\models\registry.json. Downloaded model weights are written on demand to
+; %LOCALAPPDATA% by the application and are deliberately not removed on uninstall.
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\AudioMasteringTool CLI"; Filename: "{app}\amt_cli.exe"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-[Registry]
-Root: HKA; Subkey: "Software\Classes\.amtproj"; ValueType: string; ValueName: ""; ValueData: "AudioMasteringTool.Project"; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\AudioMasteringTool.Project"; ValueType: string; ValueName: ""; ValueData: "AudioMasteringTool Project"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\AudioMasteringTool.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"
-Root: HKA; Subkey: "Software\Classes\AudioMasteringTool.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

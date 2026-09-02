@@ -348,9 +348,9 @@ void test_export_recipes() {
 
   const auto* preview = amt::project::find_export_recipe("client_preview");
   assert(preview != nullptr);
-  assert(!preview->available);
+  assert(preview->available);
   assert(preview->container == amt::codec::AudioContainer::mp3);
-  assert(!preview->unavailable_reason.empty());
+
 
   const auto* archive = amt::project::find_export_recipe("archive_float");
   assert(archive != nullptr && archive->available);

@@ -1,123 +1,137 @@
 # AudioMasteringTool
 
-An autonomous, instrument-aware audio finishing and mastering engine.
+AudioMasteringTool is a Windows-first desktop and command-line application for
+analyzing stereo mixes and producing two deterministic mastered candidates.
 
-> **Drop a track in. Get a finished master.**
+> Drop a track in. Get two loudness-matched mastering choices.
 
-AudioMasteringTool analyzes a stereo mix, identifies specific instruments and production elements where confidence allows, diagnoses problems, performs mix repair when necessary, creates two distinct mastered candidates, recommends one, provides loudness-matched A/B auditioning, accepts natural-language revisions, simulates playback translation, and exports release-ready audio.
+## Release status
 
-The first production target is a complete Windows standalone application. VST3/CLAP/ARA, web, macOS, and Linux follow after the standalone mastering engine.
+The repository is in **Windows 1.0 release-candidate hardening**. It is not yet
+approved for a public `v1.0.0` release.
 
-## Authoritative Specification
+The portable automated suite passes locally. Windows CI additionally exercises
+the MSVC builds, worker IPC, desktop self-test, and native Media Foundation
+MP3/AAC round trips. Human listening acceptance, real-model Windows acceptance,
+clean-machine installer validation, and code signing remain release gates.
 
-See [`AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md`](./AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md).
+The authoritative live checklist is
+[`docs/WINDOWS_1_0_RELEASE_CHECKLIST.md`](docs/WINDOWS_1_0_RELEASE_CHECKLIST.md).
+The broader product specification is
+[`AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md`](AUDIOMASTERINGTOOL_SPEC_AND_IMPLEMENTATION_PLAN.md).
 
-## Current Status: Windows 1.0 Release Baseline Complete
+## Currently integrated product path
 
-**Phases 0 through 15 are fully implemented, tested, and validated with 100% CTest pass rates (35 of 35 suites).**
+- Streaming WAV, AIFF, and FLAC through a pinned libsndfile runtime.
+- Windows-native MP3 and AAC/M4A decode/encode through Media Foundation,
+  guarded by a Windows integration test.
+- BS.1770-family loudness, true-peak, waveform, spectrum, stereo, structural,
+  perceptual, and integrity analysis.
+- Two deterministic mastering candidates with different preservation targets.
+- Loudness-matched Original/Master A/Master B auditioning.
+- Local project history, recent projects, export recipes, and automatic reopen.
+- Natural-language bounded revision controls in the desktop application.
+- Playback translation scoring and album batch controls in the desktop app.
+- Trusted, hash-pinned on-demand HTDemucs model acquisition and isolated worker
+  inference, with safe stereo fallback.
+- Per-monitor DPI metadata, keyboard navigation/shortcuts, privacy-gated local
+  crash logs, and an Inno Setup installer.
 
-### Key Capabilities
+## Deliberately gated capabilities
 
-1. **Production Audio & Metering Foundation (Phases 0–1)**:
-   - Framework-independent planar float32 audio buffers.
-   - Dynamic streaming codec engine for WAV, AIFF, and FLAC with metadata, tags, and progress callbacks.
-   - ITU-R BS.1770-5 / EBU R128 programme loudness analysis (integrated LUFS, momentary, short-term, LRA, true peak, crest factor, PLR).
-   - Multiresolution min/max/RMS waveform cache and high-quality sinc resampling.
-   - Windows WASAPI native playback engine with smooth seeking and playhead synchronization.
+- Automatic source-guided Mode 1 audio changes remain disabled until the
+  declared blind-listening and damage-rate policy passes.
+- Mode 2 stem reconstruction is not part of the normal desktop mastering path.
+- Exact 28-class instrument claims are not emitted because no production-
+  approved calibrated instrument detector is configured.
+- OGG/Vorbis and Opus are represented in codec contracts but are not advertised
+  as standard Windows 1.0 formats.
+- Interaction repair, reference-profile influence, and learned preferences have
+  tested domain modules but are not claimed as fully integrated release flows.
 
-2. **Mastering DSP & Automated Decision Planning (Phases 2–3, 9)**:
-   - Complete high-precision mastering processor library: linear/minimum phase EQ, dynamic EQ, opto/VCA/clean compressors, multiband dynamics, transient shaping, analog-modeled saturation, M/S widening, clipping, and true-peak limiting.
-   - Decision Engine v2: Multi-band macro-dynamics, spectral balance analysis, mix health diagnostic report, and generation of two distinct candidates (**Master A: Recommended** and **Master B: Preservation/Alternative**).
-   - Loudness-matched real-time comparison engine (Original vs Master A vs Master B).
+## Build and test
 
-3. **Instrument Taxonomy & Interaction Intelligence (Phases 5–8)**:
-   - 28-class hierarchical instrument taxonomy with confidence calibration and safe fallback.
-   - Source-guided stem analysis with HTDemucs ONNX inference and stem reconstruction safety gates.
-   - Low-end intelligence and pairwise kick/808 phase/frequency collision detection with damage-guarded repair.
-   - Mix restoration & repair tools: de-clipping, de-clicking, resonance hum removal, stereo phase stabilization, and DC offset correction.
-
-4. **Reference Mastering & MySound Profiles (Phase 10)**:
-   - Target curve matching against single/multiple reference tracks.
-   - User sound profile extraction ("MySound") capturing personalized tonal and dynamic curves.
-
-5. **Natural-Language Revision Engine (Phase 11)**:
-   - Rule-based natural language intent parser translating instructions (e.g. *"punchier kick"*, *"tame harsh highs"*, *"warmer vocals"*) into deterministic parametric DSP adjustments.
-   - Constraint-bounded plan editor and explanation generator.
-
-6. **Playback Translation Simulation (Phase 12)**:
-   - 9 acoustic simulation filters: Studio Monitors, Headphones, Earbuds, Phone Speaker, Laptop Speaker, Bluetooth Speaker, Car Audio, Mono System, Club PA.
-   - Instrument survival metrics and translation scoring across listening environments.
-
-7. **Preference Learning & Album Cohesion (Phases 13–14)**:
-   - Continuous user preference bias vector with recency weighting and JSONL persistence.
-   - Multi-track album batch queue with proportional loudness and dynamic cohesion planning.
-
-8. **Hardening, Desktop GUI, & Installer (Phase 15)**:
-   - Win32 desktop application shell with interactive action bars, waveform visualizer, natural language revision box, translation selector, album batch runner, and settings modal.
-   - `SettingsManager`, `CacheManager` (with disk budget enforcement and cache purge), and `ModelManager`.
-   - Automated Inno Setup 6 installer (`installer/audiomasteringtool_setup.iss`) and release packaging script (`scripts/package_release.ps1`).
-
----
-
-## Build & Test Instructions
-
-### Windows (MSVC C++20)
-
-Requirements: Visual Studio 2022+ with C++ Desktop Workload and CMake 3.24+.
+Requirements: Visual Studio with the C++ Desktop workload, CMake 3.24 or newer,
+Python 3.12, and a 64-bit Windows host.
 
 ```powershell
-# Configure build
-cmake -B build/win -S .
-
-# Build Release
-cmake --build build/win --config Release
-
-# Run complete 35-suite test suite
-ctest --test-dir build/win -C Release --output-on-failure
+cmake --preset windows-msvc
+cmake --build --preset windows-debug
+cmake --build --preset windows-release
+ctest --preset windows-debug --timeout 180 --output-on-failure
+ctest --preset windows-release --timeout 180 --output-on-failure
 ```
 
-### Packaging Windows Release
+Portable development validation is available on systems with Ninja and
+libsndfile:
 
-To build, test, stage, and generate the standalone installer:
+```bash
+cmake --preset ninja-debug
+cmake --build --preset ninja-debug
+ctest --preset ninja-debug --timeout 180 --output-on-failure
+```
+
+## Package Windows artifacts
+
+The packager refuses a dirty worktree by default, requires `sndfile.dll` and
+`onnxruntime.dll`, stages the packaged model registry beside the executable,
+writes release provenance and SHA-256 checksums, creates the portable ZIP, and
+builds the installer.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1
 ```
 
----
+For an unsigned internal smoke package only:
 
-## Command Line Interface (`amt_cli`)
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1 `
+  -AllowDirty -SkipInstaller
+```
+
+Production packaging should pass `-RequireSigning`, `-SignToolPath`, and
+`-SigningCertificateThumbprint`.
+
+## Command-line interface
 
 ```text
 amt_cli --version
 amt_cli codec-status
 amt_cli probe input.wav
 amt_cli analyze input.wav
-amt_cli master input.wav -o output_dir/
-amt_cli revise input.wav -o output_dir/ --prompt "punchier drums, tame high end"
-amt_cli translate input.wav --profile phone_speaker
-amt_cli batch file1.wav file2.wav file3.wav -o album_out/
+amt_cli deep-analyze input.wav --json
+amt_cli instruments input.wav --json
+amt_cli plan input.wav
+amt_cli master input.wav output-directory
+amt_cli calibrate-source-guidance input.wav output-directory \
+  --registry models/registry.json --worker amt_worker.exe \
+  --model-root model-store
+amt_cli audition original.wav master-a.wav master-b.wav
 amt_cli export input.wav output.wav --sample-rate 44100 --bits 24
 amt_cli compare input.wav output.wav --tolerance 1e-7
 amt_cli play input.wav
+amt_cli rerender input.wav output.wav
+amt_cli verify input.wav output.wav
 ```
 
----
+## Safety principles
 
-## Core Architecture Principles
+- The original stereo source is canonical and is never destructively edited.
+- Exact source or instrument claims require supporting evidence and confidence.
+- Optional model or worker failures fall back to deterministic stereo mastering.
+- Sound-changing features stay gated until their listening policy passes.
+- CPU execution remains supported; CUDA is optional.
+- User projects, settings, downloaded models, and caches are not deleted by the
+  application uninstaller.
 
-- **Automatic by default**: Drop a track in and get a finished master.
-- **Instrument-aware**: Time-localized instrument detection and interaction diagnostics.
-- **Preserve Character**: Respect intentional saturation, clipping, and sample texture.
-- **Original is Canonical**: Source stereo mix is never replaced with blind separation without safety-gated benefit verification.
-- **Two Distinct Candidates**: Master A (target competitive release) and Master B (preservation-focused).
-- **Loudness-Matched Auditioning**: Seamless A/B comparison without volume bias.
-- **Lossless & High Precision**: Float32 planar pipeline with deterministic TPDF dither on final quantization.
+## Privacy
 
----
+Audio, projects, analysis, models, settings, and logs remain on the local
+machine. The Windows 1.0 application implements no telemetry upload transport;
+the persisted telemetry preference defaults to disabled. Crash logging also
+defaults to disabled. If the user opts in, the application writes a sanitized
+text log locally below
+`%LOCALAPPDATA%\AudioMasteringTool\crashes`; it does not upload that log.
 
-## Roadmap Ahead
-
-- **Phase 16 — VST3 / ARA-capable Architecture (`1.1`)**
-- **Phase 17 — Web Application (`1.2`)**
-- **Phase 18 — macOS (`1.3`) and Linux (`1.4`)**
+Post-1.0 platform and plugin work begins only after the Windows acceptance gate
+is complete.

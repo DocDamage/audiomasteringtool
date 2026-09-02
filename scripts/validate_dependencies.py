@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+import re
 import json
 from pathlib import Path
 
@@ -20,4 +20,18 @@ for item in items:
         if field.lower().endswith("sha256"):
             assert isinstance(value, str) and len(value) == 64
             int(value, 16)
-print(f"dependency manifest valid: {len(items)} entries")
+
+# Reconcile ONNX Runtime version with CMakeLists.txt if pinned
+cmake_path = root / "CMakeLists.txt"
+if cmake_path.exists():
+    cmake_content = cmake_path.read_text(encoding="utf-8")
+    ort_match = re.search(r'set\(AMT_ORT_VERSION\s+"([^"]+)"\)', cmake_content)
+    if ort_match:
+        cmake_ort_ver = ort_match.group(1)
+        ort_dep = next((d for d in items if d["name"] == "ONNX Runtime"), None)
+        assert ort_dep, "ONNX Runtime dependency missing in manifest"
+        assert ort_dep["version"] == cmake_ort_ver, (
+            f"ONNX Runtime version mismatch: manifest={ort_dep['version']} vs CMakeLists.txt={cmake_ort_ver}"
+        )
+
+print(f"dependency manifest valid and reconciled: {len(items)} entries")

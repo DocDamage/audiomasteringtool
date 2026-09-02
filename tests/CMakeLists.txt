@@ -1,6 +1,25 @@
+# Ensure assert() verification is never disabled in test suites regardless of build configuration
+if(MSVC)
+  add_compile_options(/UNDEBUG)
+else()
+  add_compile_options(-UNDEBUG)
+endif()
+
 add_executable(amt_phase0_tests phase0_tests.cpp)
 target_link_libraries(amt_phase0_tests PRIVATE amt_core amt_codec)
 add_test(NAME phase0_core COMMAND amt_phase0_tests)
+
+if(WIN32)
+  add_executable(amt_windows_media_foundation_codec_tests
+    windows_media_foundation_codec_tests.cpp)
+  target_link_libraries(amt_windows_media_foundation_codec_tests PRIVATE
+    amt_core
+    amt_audio
+    amt_codec
+  )
+  add_test(NAME windows_media_foundation_lossy_codecs
+    COMMAND amt_windows_media_foundation_codec_tests)
+endif()
 
 add_executable(amt_phase1_tests phase1_tests.cpp)
 target_link_libraries(amt_phase1_tests PRIVATE

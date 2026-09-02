@@ -32,6 +32,7 @@ class CacheManager {
 
  private:
   std::filesystem::path cache_dir_;
+  bool managed_{false};
 };
 
 }  // namespace amt::settings

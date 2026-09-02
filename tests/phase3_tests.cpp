@@ -190,14 +190,14 @@ void test_deep_report() {
   std::string error;
   const auto report = amt::analysis::analyze_track(codecs, "program.wav", error);
   assert(report.has_value());
-  assert(report->schema_version == 2);
+  assert(report->schema_version == 3);
   assert(report->structural.sections.size() >= 2U);
   assert(report->mix_health.dimensions.size() == 5U);
   assert(report->mix_health.overall_heuristic_score >= 0.0 &&
          report->mix_health.overall_heuristic_score <= 100.0);
   assert(!report->findings.empty());
   const auto json = amt::analysis::analysis_report_to_json(*report);
-  assert(json.find("\"schema_version\":2") != std::string::npos);
+  assert(json.find("\"schema_version\":3") != std::string::npos);
   assert(json.find("\"mix_health\"") != std::string::npos);
   assert(json.find("\"findings\"") != std::string::npos);
 }

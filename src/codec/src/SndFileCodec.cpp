@@ -1,4 +1,5 @@
 #include "amt/codec/SndFileCodec.h"
+#include "amt/codec/MediaFoundationCodec.h"
 
 #include <array>
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -309,7 +311,9 @@ struct SndFileCodecService::Impl {
   };
 
   std::shared_ptr<Api> api{std::make_shared<Api>()};
+  MediaFoundationCodecService mf_codecs;
 };
+
 
 namespace {
 
@@ -496,103 +500,177 @@ SndFileCodecService::SndFileCodecService(SndFileCodecService&&) noexcept = defau
 SndFileCodecService& SndFileCodecService::operator=(SndFileCodecService&&) noexcept = default;
 
 bool SndFileCodecService::available() const noexcept {
-  return impl_ != nullptr && impl_->api != nullptr && impl_->api->ready();
+  return impl_ != nullptr &&
+         ((impl_->api != nullptr && impl_->api->ready()) ||
+          impl_->mf_codecs.available());
 }
 
 std::string SndFileCodecService::backend_name() const {
-  if (!available()) return "libsndfile unavailable";
-  if (impl_->api->version != nullptr) return impl_->api->version();
-  return "libsndfile";
+  if (impl_ == nullptr) return "codec service moved-from";
+  const bool sndfile_ready = impl_->api != nullptr && impl_->api->ready();
+  const bool media_foundation_ready = impl_->mf_codecs.available();
+  if (sndfile_ready && media_foundation_ready) {
+    const std::string sndfile_name = impl_->api->version != nullptr
+        ? impl_->api->version() : "libsndfile";
+    return sndfile_name + " + Windows Media Foundation";
+  }
+  if (sndfile_ready) {
+    return impl_->api->version != nullptr ? impl_->api->version() : "libsndfile";
+  }
+  if (media_foundation_ready) return impl_->mf_codecs.backend_name();
+  return "audio codecs unavailable";
 }
 
 std::string SndFileCodecService::backend_error() const {
-  return impl_ == nullptr || impl_->api == nullptr ? "codec service moved-from"
-                                                   : impl_->api->load_error;
+  if (impl_ == nullptr || impl_->api == nullptr) return "codec service moved-from";
+  if (available()) return {};
+  return impl_->api->load_error + "; " + impl_->mf_codecs.backend_error();
 }
 
 std::vector<CodecCapability> SndFileCodecService::capabilities() const {
+  const bool sf_ok = impl_ != nullptr && impl_->api != nullptr && impl_->api->ready();
+  const bool mf_ok = impl_ != nullptr && impl_->mf_codecs.available();
   return {{.container = AudioContainer::wav,
            .name = "WAV",
            .extensions = {"wav", "wave"},
-           .decode = available(),
-           .encode = available(),
+           .decode = sf_ok || mf_ok,
+           .encode = sf_ok || mf_ok,
            .lossless = true},
           {.container = AudioContainer::aiff,
            .name = "AIFF",
            .extensions = {"aif", "aiff"},
-           .decode = available(),
-           .encode = available(),
+           .decode = sf_ok || mf_ok,
+           .encode = sf_ok,
            .lossless = true},
           {.container = AudioContainer::flac,
            .name = "FLAC",
            .extensions = {"flac"},
-           .decode = available(),
-           .encode = available(),
-           .lossless = true}};
+           .decode = sf_ok || mf_ok,
+           .encode = sf_ok,
+           .lossless = true},
+          {.container = AudioContainer::mp3,
+           .name = "MP3",
+           .extensions = {"mp3"},
+           .decode = mf_ok,
+           .encode = mf_ok,
+           .lossless = false},
+          {.container = AudioContainer::aac_m4a,
+           .name = "AAC / M4A",
+           .extensions = {"m4a", "aac"},
+           .decode = mf_ok,
+           .encode = mf_ok,
+           .lossless = false},
+          {.container = AudioContainer::ogg,
+           .name = "OGG / Vorbis",
+           .extensions = {"ogg"},
+           .decode = false,
+           .encode = false,
+           .lossless = false},
+          {.container = AudioContainer::opus,
+           .name = "Opus",
+           .extensions = {"opus"},
+           .decode = false,
+           .encode = false,
+           .lossless = false}};
 }
 
 std::optional<AudioMetadata> SndFileCodecService::probe(
     const std::filesystem::path& path, std::string& error) const {
-  if (!available()) {
+  const auto container = container_from_extension(path);
+  if (container == AudioContainer::mp3 ||
+      container == AudioContainer::aac_m4a) {
+    if (impl_ != nullptr && impl_->mf_codecs.available()) {
+      return impl_->mf_codecs.probe(path, error);
+    }
+  }
+
+  const bool sndfile_ready = impl_ != nullptr && impl_->api != nullptr && impl_->api->ready();
+  if (sndfile_ready && is_phase1_container(container)) {
+    SfInfo info{};
+    SndFile* file = impl_->api->open_path(path, kReadMode, &info);
+    if (file != nullptr) {
+      auto metadata = make_metadata(impl_->api, file, info);
+      impl_->api->close(file);
+      if (valid_phase1_metadata(metadata)) {
+        return metadata;
+      }
+    }
+  }
+
+  if (impl_ != nullptr && impl_->mf_codecs.available() &&
+      container != AudioContainer::ogg && container != AudioContainer::opus &&
+      container != AudioContainer::unknown) {
+    return impl_->mf_codecs.probe(path, error);
+  }
+
+  if (!sndfile_ready && (impl_ == nullptr || !impl_->mf_codecs.available())) {
     error = backend_error();
     return std::nullopt;
   }
-  if (!is_phase1_container(container_from_extension(path))) {
-    error = "input extension is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
-    return std::nullopt;
-  }
-
-  SfInfo info{};
-  SndFile* file = impl_->api->open_path(path, kReadMode, &info);
-  if (file == nullptr) {
-    error = impl_->api->last_error(nullptr, "unable to open audio file");
-    return std::nullopt;
-  }
-  auto metadata = make_metadata(impl_->api, file, info);
-  impl_->api->close(file);
-  if (!valid_phase1_metadata(metadata)) {
-    error = "audio format is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
-    return std::nullopt;
-  }
-  return metadata;
+  error = "unsupported or unrecognized audio container: " + path.string();
+  return std::nullopt;
 }
 
 std::unique_ptr<IAudioDecoder> SndFileCodecService::open_decoder(
     const std::filesystem::path& path, std::string& error) const {
-  if (!available()) {
+  const auto container = container_from_extension(path);
+  if (container == AudioContainer::mp3 ||
+      container == AudioContainer::aac_m4a) {
+    if (impl_ != nullptr && impl_->mf_codecs.available()) {
+      return impl_->mf_codecs.open_decoder(path, error);
+    }
+  }
+
+  const bool sndfile_ready = impl_ != nullptr && impl_->api != nullptr && impl_->api->ready();
+  if (sndfile_ready && is_phase1_container(container)) {
+    SfInfo info{};
+    SndFile* file = impl_->api->open_path(path, kReadMode, &info);
+    if (file != nullptr) {
+      auto metadata = make_metadata(impl_->api, file, info);
+      if (valid_phase1_metadata(metadata)) {
+        return std::make_unique<SndFileDecoder>(impl_->api, file, std::move(metadata));
+      }
+      impl_->api->close(file);
+    }
+  }
+
+  if (impl_ != nullptr && impl_->mf_codecs.available() &&
+      container != AudioContainer::ogg && container != AudioContainer::opus &&
+      container != AudioContainer::unknown) {
+    return impl_->mf_codecs.open_decoder(path, error);
+  }
+
+  if (!sndfile_ready && (impl_ == nullptr || !impl_->mf_codecs.available())) {
     error = backend_error();
     return nullptr;
   }
-  if (!is_phase1_container(container_from_extension(path))) {
-    error = "input extension is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
-    return nullptr;
-  }
-
-  SfInfo info{};
-  SndFile* file = impl_->api->open_path(path, kReadMode, &info);
-  if (file == nullptr) {
-    error = impl_->api->last_error(nullptr, "unable to open audio decoder");
-    return nullptr;
-  }
-  auto metadata = make_metadata(impl_->api, file, info);
-  if (!valid_phase1_metadata(metadata)) {
-    impl_->api->close(file);
-    error = "decoder format is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
-    return nullptr;
-  }
-  return std::make_unique<SndFileDecoder>(impl_->api, file, std::move(metadata));
+  error = "unable to open audio decoder for: " + path.string();
+  return nullptr;
 }
 
 std::unique_ptr<IAudioEncoder> SndFileCodecService::open_encoder(
     const std::filesystem::path& path, const EncodeSettings& settings,
     std::string& error) const {
-  if (!available()) {
+  if (settings.container == AudioContainer::mp3 || settings.container == AudioContainer::aac_m4a) {
+    if (impl_ != nullptr && impl_->mf_codecs.available()) {
+      return impl_->mf_codecs.open_encoder(path, settings, error);
+    }
+  }
+
+  const bool sndfile_ready = impl_ != nullptr && impl_->api != nullptr && impl_->api->ready();
+  if (!sndfile_ready) {
+    if (impl_ != nullptr && impl_->mf_codecs.available()) {
+      return impl_->mf_codecs.open_encoder(path, settings, error);
+    }
     error = backend_error();
     return nullptr;
   }
   if (!is_phase1_container(settings.container) ||
       container_from_extension(path) != settings.container) {
-    error = "output path/container is outside the controlled Phase 1 WAV/AIFF/FLAC codec set";
+    if (impl_ != nullptr && impl_->mf_codecs.available()) {
+      return impl_->mf_codecs.open_encoder(path, settings, error);
+    }
+    error = "output path/container is unsupported";
     return nullptr;
   }
   if (settings.sample_rate <= 0 || settings.channels <= 0) {
@@ -605,7 +683,7 @@ std::unique_ptr<IAudioEncoder> SndFileCodecService::open_encoder(
   info.channels = settings.channels;
   info.format = format_code(settings.container, settings.sample_format);
   if (info.format == 0 || impl_->api->format_check(&info) == 0) {
-    error = "requested output sample format is unsupported for the selected Phase 1 container";
+    error = "requested output sample format is unsupported for the selected container";
     return nullptr;
   }
 

@@ -44,6 +44,7 @@
 #include "amt/revision/RevisionExplanation.h"
 #include "amt/revision/RevisionParser.h"
 #include "amt/settings/CacheManager.h"
+#include "amt/settings/CrashReporting.h"
 #include "amt/settings/ModelManager.h"
 #include "amt/settings/SettingsManager.h"
 #include "amt/translation/PlaybackClass.h"
@@ -81,6 +82,28 @@ constexpr int kTranslationComboId = 1210;
 constexpr int kBatchButtonId = 1230;
 constexpr int kSettingsButtonId = 1240;
 constexpr UINT kRecentMenuBase = 40000U;
+
+LONG WINAPI record_unhandled_exception(EXCEPTION_POINTERS* exception) {
+  amt::settings::SettingsManager settings;
+  std::string settings_error;
+  settings.load(settings_error);
+  if (!settings.settings().crash_reports_enabled) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+
+  std::ostringstream details;
+  details << "Unhandled Windows exception";
+  if (exception != nullptr && exception->ExceptionRecord != nullptr) {
+    details << " code=0x" << std::hex
+            << exception->ExceptionRecord->ExceptionCode;
+  }
+  std::string crash_error;
+  amt::settings::CrashReporting::record_crash_log(
+      amt::settings::SettingsManager::default_settings_path().parent_path() /
+          "crashes",
+      "AudioMasteringTool desktop process", details.str(), true, crash_error);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
 
 HMENU control_menu(const int id) noexcept {
   return reinterpret_cast<HMENU>(static_cast<INT_PTR>(id));
@@ -628,11 +651,12 @@ void choose_source(AppState& state) {
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
   dialog.hwndOwner = state.window;
-  dialog.lpstrFilter = L"Supported audio (*.wav;*.wave;*.aif;*.aiff;*.flac)\0*.wav;*.wave;*.aif;*.aiff;*.flac\0All files (*.*)\0*.*\0\0";
+  dialog.lpstrFilter = L"Supported audio (*.wav;*.wave;*.aif;*.aiff;*.flac;*.mp3;*.m4a;*.aac)\0*.wav;*.wave;*.aif;*.aiff;*.flac;*.mp3;*.m4a;*.aac\0Lossless audio (*.wav;*.aif;*.flac)\0*.wav;*.wave;*.aif;*.aiff;*.flac\0All files (*.*)\0*.*\0\0";
   dialog.lpstrFile = buffer;
   dialog.nMaxFile = static_cast<DWORD>(std::size(buffer));
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
   if (GetOpenFileNameW(&dialog) != FALSE) open_source_path(state, buffer);
+
 }
 
 void choose_recent(AppState& state) {
@@ -1242,7 +1266,7 @@ void update_transport_ui(AppState& state) {
 }
 
 void create_controls(AppState& state) {
-  constexpr DWORD button = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+  constexpr DWORD button = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
   state.open_button = CreateWindowExW(0, L"BUTTON", L"Open", button, 0, 0, 0, 0,
                                       state.window, control_menu(kOpenId), nullptr, nullptr);
   state.recent_button = CreateWindowExW(0, L"BUTTON", L"Recent", button, 0, 0, 0, 0,
@@ -1260,7 +1284,8 @@ void create_controls(AppState& state) {
   state.settings_button = CreateWindowExW(0, L"BUTTON", L"Settings", button, 0, 0, 0, 0,
                                           state.window, control_menu(kSettingsButtonId), nullptr, nullptr);
   state.recipe_combo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", L"",
-      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 0, 0, 0, 0,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      0, 0, 0, 0,
       state.window, control_menu(kRecipeId), nullptr, nullptr);
 
   state.play_button = CreateWindowExW(0, L"BUTTON", L"Play", button, 0, 0, 0, 0,
@@ -1274,11 +1299,12 @@ void create_controls(AppState& state) {
   state.master_b_button = CreateWindowExW(0, L"BUTTON", L"Master B", button, 0, 0, 0, 0,
                                           state.window, control_menu(kMasterBId), nullptr, nullptr);
   state.translation_combo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", L"",
-      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 0, 0, 0, 0,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      0, 0, 0, 0,
       state.window, control_menu(kTranslationComboId), nullptr, nullptr);
 
   state.revision_edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0,
       state.window, control_menu(kRevisionEditId), nullptr, nullptr);
   SendMessageW(state.revision_edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Natural language revision: e.g. 'punchier kick', 'tame harsh highs', 'preserve sub-bass'"));
 
@@ -1289,7 +1315,8 @@ void create_controls(AppState& state) {
       L"Drop audio here or choose Open. Projects are saved locally automatically.",
       WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, state.window, nullptr, nullptr, nullptr);
   state.seek = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
-      WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, 0, 0, 0, 0,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
+      0, 0, 0, 0,
       state.window, control_menu(kSeekId), nullptr, nullptr);
   SendMessageW(state.seek, TBM_SETRANGE, TRUE, MAKELONG(0, kSeekRange));
   state.progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE,
@@ -1348,7 +1375,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         }
         return 0;
       }
-      if (HIWORD(wparam) == BN_CLICKED) {
+      if (HIWORD(wparam) == BN_CLICKED || HIWORD(wparam) == 1U) {
         switch (LOWORD(wparam)) {
           case kOpenId: choose_source(*state); return 0;
           case kRecentId: choose_recent(*state); return 0;
@@ -1428,7 +1455,7 @@ int run_phase4_self_test(const std::filesystem::path& input,
   project.analysis_json = amt::analysis::analysis_report_to_json(*report);
   if (!store.append_revision(project, "analysis", "Self-test analysis.", {}, error)) return 43;
   auto plan = amt::mastering::plan_mastering(*report);
-  auto rendered = amt::mastering::render_mastering_plan(
+  auto rendered = amt::mastering::render_mastering_plan_stereo_self_test(
       codecs, input, project_root / project.project_id / "renders",
       report->technical, plan, error);
   if (!rendered) return 44;
@@ -1454,7 +1481,10 @@ int run_phase4_self_test(const std::filesystem::path& input,
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  SetUnhandledExceptionFilter(record_unhandled_exception);
   int argument_count = 0;
+
   LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
   if (arguments && argument_count == 4 &&
       std::wstring(arguments[1]) == L"--phase4-self-test") {
@@ -1474,6 +1504,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   wc.hInstance = instance;
   wc.lpszClassName = kWindowClass;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+  wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
   wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
   if (RegisterClassW(&wc) == 0) return 1;
 
@@ -1489,11 +1520,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
   ShowWindow(window, show_command);
   UpdateWindow(window);
 
+  ACCEL accelerator_entries[] = {
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('O'), kOpenId},
+      {static_cast<BYTE>(FVIRTKEY), VK_F5, kAnalyzeId},
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('M'), kMasterId},
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('E'), kExportId},
+      {static_cast<BYTE>(FVIRTKEY), VK_ESCAPE, kCancelId},
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('1'), kOriginalId},
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('2'), kMasterAId},
+      {static_cast<BYTE>(FVIRTKEY | FCONTROL), static_cast<WORD>('3'), kMasterBId},
+  };
+  HACCEL accelerators = CreateAcceleratorTableW(
+      accelerator_entries, static_cast<int>(std::size(accelerator_entries)));
+
   MSG message{};
   while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+    if (accelerators != nullptr &&
+        TranslateAcceleratorW(window, accelerators, &message) != 0) {
+      continue;
+    }
     TranslateMessage(&message);
     DispatchMessageW(&message);
   }
+  if (accelerators != nullptr) DestroyAcceleratorTable(accelerators);
   return static_cast<int>(message.wParam);
 }
 

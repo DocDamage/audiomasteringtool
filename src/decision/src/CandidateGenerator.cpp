@@ -1,7 +1,5 @@
 #include "amt/decision/CandidateGenerator.h"
 
-#include <cmath>
-
 namespace amt::decision {
 
 std::vector<MasterCandidateProfile> CandidateGenerator::generate_candidates(
@@ -9,9 +7,7 @@ std::vector<MasterCandidateProfile> CandidateGenerator::generate_candidates(
     const MasteringConstraints& constraints) const {
   std::vector<MasterCandidateProfile> candidates;
 
-  const double input_lufs = evidence.integrated_lufs > -60.0 ? evidence.integrated_lufs : -18.0;
-  const double delta_lufs = constraints.target_lufs - input_lufs;
-  const double base_gain = std::clamp(delta_lufs, -6.0, constraints.max_loudness_boost_db);
+  (void)evidence;
 
   // Candidate 1: Balanced Modern Polish (Master A candidate)
   MasterCandidateProfile cand_a{};

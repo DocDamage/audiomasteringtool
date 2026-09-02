@@ -21,7 +21,7 @@
       "ramMb": 0,
       "vramMb": 0,
       "securityReview": "approved",
-      "benchmarkRecord": "Pinned converter reports FP16-weight ONNX parity max-abs difference about 4.58e-5 and preserves upstream HTDemucs MUSDB18-HQ benchmark context. AudioMasteringTool automatic Mode 1 damage-rate calibration remains pending, so this package is diagnostic-only for automatic mastering.",
+      "benchmarkRecord": "Pinned converter reports FP16-weight ONNX parity max-abs difference about 4.58e-5 and preserves upstream HTDemucs MUSDB18-HQ benchmark context. AudioMasteringTool automatic Mode 1 damage-rate and listening calibration remains pending, so source estimates are diagnostic-only for automatic mastering.",
       "executionProviders": ["cpu"],
       "inputSampleRate": 44100,
       "stemTaxonomy": ["drums", "bass", "other", "vocals"],

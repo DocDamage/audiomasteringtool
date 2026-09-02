@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(AudioMasteringTool VERSION 0.5.0 LANGUAGES C CXX)
+project(AudioMasteringTool VERSION 1.0.0 LANGUAGES C CXX)
+
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
